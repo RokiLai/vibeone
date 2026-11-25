@@ -57,7 +57,11 @@ python3 -m venv .venv
 
 ### 3. 配置 `.env`
 
-在项目根目录创建 `.env`（已被 `.gitignore` 忽略）：
+复制配置模板并编辑 `.env`（已被 `.gitignore` 忽略）：
+
+```bash
+cp .env.example .env
+```
 
 ```dotenv
 # 必填：登录访问密钥（建议使用高强度随机字符串）
@@ -95,7 +99,7 @@ VIBEONE_WORKDIR=/path/to/your/workspace
 | `VIBEONE_VAPID_SUBJECT` | 否 | `mailto:admin@example.com` | Web Push VAPID 联系邮箱（需使用合法域名，不能用 `@localhost`） |
 | `VIBEONE_MAX_UPLOAD_BYTES` | 否 | `26214400` (25MB) | 单张图片上传大小上限 |
 | `VIBEONE_LAUNCHD_LABEL` | 否 | `local.vibeone` | macOS LaunchAgent 服务标识（用于 `.restart_after_turn` 自动重启） |
-| `AGY_PROFILE` | 否 | 自动探测（优先 `agy2`） | 首次启动默认选中的账号 |
+| `AGY_PROFILE` | 否 | 自动探测（优先已登录账号） | 首次启动默认选中的账号 |
 | `AGY_PROFILES_DIR` | 否 | `~/.config/agy/profiles` | Antigravity 多账号目录 |
 | `AGY_BIN` / `AGY_REAL_BIN` | 否 | 自动从 `~/.local/bin` 和 `PATH` 查找 | 指定 `agy` 可执行文件路径 |
 | `CODEX_BIN` | 否 | 自动从 `PATH` / Homebrew 查找 | 指定 `codex` 可执行文件路径 |
@@ -137,17 +141,21 @@ VibeOne 面向单用户自托管。Web 登录后可以访问本机工作区、�
 2. 在 iPhone Safari 打开可信的 HTTPS 地址，使用分享菜单中的 **添加到主屏幕**。
 3. 从主屏幕打开 VibeOne，在设置中启用 Web Push，并允许系统通知。
 
+下面是 iPhone 通知中心收到的 VibeOne 测试推送。
+
+<img src="docs/demo/ios-push.jpg" width="340" alt="iPhone 通知中心显示 VibeOne 推送测试成功">
+
 ## 开发与测试
 
 ```bash
 # 后端语法检查
-.venv/bin/python -m py_compile server.py
+.venv/bin/python -m py_compile server.py vibeone/*.py vibeone/engines/*.py
 
 # 运行单元测试
 .venv/bin/python -m unittest discover -s tests -v
 ```
 
-- 修改前端文件（`index.html`、`static/app.js`、`static/app.css`）刷新浏览器即可生效，无需重启后端。
+- 修改前端文件（`index.html`、`static/*`）刷新浏览器即可生效，无需重启后端。
 - 修改后端 Python 代码后需重启服务生效；如果通过 macOS LaunchAgent 托管运行，可在项目根目录创建 `.restart_after_turn` 触发当前回合结束后的无损自动重启。
 
 ### 目录结构
@@ -156,22 +164,25 @@ VibeOne 面向单用户自托管。Web 登录后可以访问本机工作区、�
 vibeone/
 ├── server.py               # FastAPI 入口与 HTTP / WebSocket API
 ├── start.sh                # 一键启动脚本（自动加载 .env 与 PATH）
+├── .env.example            # 环境变量配置模板
 ├── index.html              # 前端入口页面
 ├── manifest.json           # PWA Manifest
-├── sw.js                   # Service Worker（Web Push 通知）
+├── sw.js                   # Service Worker（离线缓存与 Web Push 通知）
 ├── Caddyfile.example       # Caddy HTTPS 反向代理配置示例
 ├── requirements.txt        # Python 依赖
 ├── vibeone/
 │   ├── config.py           # 环境变量、二进制路径与多账号配置解析
 │   ├── store.py            # SQLite 会话、消息与元数据持久化
+│   ├── passkey.py          # WebAuthn / Passkey 生物识别登录
+│   ├── auth_flow.py        # 网页内 CLI 账号登录流程管理
 │   ├── push.py             # VAPID Web Push 推送管理
 │   ├── quota.py            # 账号余量查询
 │   └── engines/
 │       ├── acp.py          # Antigravity ACP 引擎封装
 │       ├── codex.py        # OpenAI Codex App-Server 引擎封装
 │       └── pool.py         # 多账号热切换连接池与后台预热
-├── static/                 # 前端逻辑与样式 (app.js, app.css)
-├── vendor/                 # 本地前端依赖 (marked, highlight.js, DOMPurify)
+├── static/                 # 前端模块脚本与样式 (app-*.js, app.css)
+├── vendor/                 # 本地前端依赖 (Tailwind CSS, marked, highlight.js, DOMPurify)
 ├── icons/                  # PWA 图标资源
 └── tests/                  # 单元测试
 ```
