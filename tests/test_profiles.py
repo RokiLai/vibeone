@@ -58,6 +58,42 @@ class ProfileListTest(unittest.TestCase):
                     patch.object(config, "resolve_codex_binary", return_value=""):
                 self.assertEqual(config.list_agy_profiles("default"), [])
 
+    def test_ensure_profile_home_registers_shared_skills_json(self):
+        with tempfile.TemporaryDirectory() as td:
+            real_home = Path(td) / "real_home"
+            profiles = real_home / ".config/agy/profiles"
+            profile_dir = profiles / "agy2"
+            gemini_skills = real_home / ".gemini/config/skills"
+            codex_skills = real_home / ".codex/skills"
+            profile_dir.mkdir(parents=True)
+            gemini_skills.mkdir(parents=True)
+            codex_skills.mkdir(parents=True)
+
+            with patch.object(config, "REAL_HOME", real_home), \
+                    patch.object(config, "AGY_PROFILES_DIR", profiles):
+                home = config.ensure_profile_home("agy2")
+                skills_json = home / ".gemini/config/skills.json"
+                self.assertTrue(skills_json.is_file())
+                data = json.loads(skills_json.read_text(encoding="utf-8"))
+                self.assertEqual(
+                    [e["path"] for e in data["entries"]],
+                    [str(gemini_skills), str(codex_skills)],
+                )
+
+                # Preserves custom entries and remains idempotent
+                data["entries"].insert(0, {"path": "/custom/skills"})
+                skills_json.write_text(json.dumps(data), encoding="utf-8")
+                config.ensure_profile_home("agy2")
+                data_after = json.loads(skills_json.read_text(encoding="utf-8"))
+                self.assertEqual(
+                    [e["path"] for e in data_after["entries"]],
+                    ["/custom/skills", str(gemini_skills), str(codex_skills)],
+                )
+
+                # REAL_HOME itself is untouched
+                config.ensure_profile_home("default")
+                self.assertFalse((real_home / ".gemini/config/skills.json").exists())
+
 
 class KeychainAccountTest(unittest.IsolatedAsyncioTestCase):
     def setUp(self):

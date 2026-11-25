@@ -316,6 +316,52 @@ def resolve_profile_home(profile: str) -> Path:
     return p
 
 
+def _sync_shared_agy_skills_config(home: Path) -> None:
+    """Register REAL_HOME shared skill directories in an isolated agy profile's skills.json."""
+    shared_dirs = [
+        str(p)
+        for p in (REAL_HOME / ".gemini" / "config" / "skills", REAL_HOME / ".codex" / "skills")
+        if p.is_dir()
+    ]
+    if not shared_dirs:
+        return
+    cfg_dir = home / ".gemini" / "config"
+    cfg_file = cfg_dir / "skills.json"
+    data: Dict[str, Any] = {}
+    if cfg_file.exists():
+        try:
+            loaded = json.loads(cfg_file.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return
+        if not isinstance(loaded, dict):
+            return
+        data = loaded
+    entries = data.get("entries")
+    if entries is None:
+        entries = []
+    elif not isinstance(entries, list):
+        return
+    existing_paths = {
+        str(item.get("path")).strip()
+        for item in entries
+        if isinstance(item, dict) and item.get("path")
+    }
+    changed = not cfg_file.exists()
+    for path_str in shared_dirs:
+        if path_str not in existing_paths:
+            entries.append({"path": path_str})
+            existing_paths.add(path_str)
+            changed = True
+    if not changed:
+        return
+    data["entries"] = entries
+    try:
+        cfg_dir.mkdir(parents=True, exist_ok=True)
+        cfg_file.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    except OSError:
+        pass
+
+
 def ensure_profile_home(profile: str) -> Path:
     home = resolve_profile_home(profile)
     (home / ".gemini").mkdir(parents=True, exist_ok=True)
@@ -328,6 +374,7 @@ def ensure_profile_home(profile: str) -> Path:
                     dst.symlink_to(src)
                 except OSError:
                     pass
+        _sync_shared_agy_skills_config(home)
     return home
 
 
