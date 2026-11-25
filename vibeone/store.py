@@ -56,14 +56,14 @@ class SessionStore:
                 title TEXT NOT NULL,
                 created_at REAL NOT NULL,
                 updated_at REAL NOT NULL,
-                profile TEXT NOT NULL DEFAULT 'agy2'
+                profile TEXT NOT NULL DEFAULT 'default'
             )
             """
         )
         cols = {r[1] for r in self._conn.execute("PRAGMA table_info(sessions)").fetchall()}
         if "profile" not in cols:
             self._conn.execute(
-                "ALTER TABLE sessions ADD COLUMN profile TEXT NOT NULL DEFAULT 'agy2'"
+                "ALTER TABLE sessions ADD COLUMN profile TEXT NOT NULL DEFAULT 'default'"
             )
         self._conn.execute(
             """

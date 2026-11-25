@@ -7,10 +7,7 @@ from . import config
 
 logger = config.logger
 
-AGY_OAUTH_TOKEN_FILE = os.environ.get(
-    "AGY_OAUTH_TOKEN_FILE",
-    str(Path.home() / ".config/agy/profiles/agy2/.gemini/antigravity-cli/antigravity-oauth-token"),
-)
+AGY_OAUTH_TOKEN_FILE = os.environ.get("AGY_OAUTH_TOKEN_FILE", "").strip()
 AGY_QUOTA_ENDPOINTS = [
     h.strip()
     for h in os.environ.get(

@@ -14,3 +14,4 @@ Caddyfile
 .DS_Store
 .restart_after_turn
 .cache/
+changes/

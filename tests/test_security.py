@@ -68,6 +68,17 @@ class SecurityHardeningTest(unittest.IsolatedAsyncioTestCase):
             await server.login(server.AuthRequest(token=config.VIBEONE_WEB_TOKEN), req, Response())
         self.assertEqual(ctx.exception.status_code, 429)
 
+    async def test_client_ip_only_trusts_x_real_ip_from_loopback_proxy(self) -> None:
+        direct_req = MagicMock()
+        direct_req.headers = {"x-real-ip": "1.2.3.4"}
+        direct_req.client.host = "203.0.113.5"
+        self.assertEqual(server._get_client_ip(direct_req), "203.0.113.5")
+
+        proxied_req = MagicMock()
+        proxied_req.headers = {"x-real-ip": "198.51.100.7"}
+        proxied_req.client.host = "127.0.0.1"
+        self.assertEqual(server._get_client_ip(proxied_req), "198.51.100.7")
+
     async def test_vendor_and_static_asset_whitelists(self) -> None:
         resp_vendor = await server.serve_vendor_asset("purify.min.js")
         self.assertEqual(resp_vendor.media_type, "application/javascript")

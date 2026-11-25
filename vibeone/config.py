@@ -89,15 +89,23 @@ def _detect_default_profile() -> str:
     env_p = os.environ.get("AGY_PROFILE", "").strip()
     if env_p:
         return env_p
-    bin_name = Path(os.environ.get("AGY_BIN", "") or "agy2").name
-    if bin_name and (AGY_PROFILES_DIR / bin_name).is_dir():
-        return bin_name
-    if (AGY_PROFILES_DIR / "agy2").is_dir():
-        return "agy2"
+    explicit_bin = os.environ.get("AGY_BIN", "").strip()
+    if explicit_bin:
+        bin_name = Path(explicit_bin).name
+        if bin_name and (AGY_PROFILES_DIR / bin_name).is_dir():
+            return bin_name
+    try:
+        discovered = list_agy_profiles()
+    except OSError:
+        discovered = []
+    for p in discovered:
+        if p.get("logged_in"):
+            return str(p["name"])
+    if discovered:
+        return str(discovered[0]["name"])
     return "default"
 
 
-DEFAULT_AGY_PROFILE = _detect_default_profile()
 CODEX_PROFILE_NAME = "codex"
 CODEX_PROFILES_DIR = REAL_HOME / ".config" / "codex" / "profiles"
 
@@ -150,8 +158,12 @@ def _unwrap_native_codex_binary(bin_path: str) -> str:
             for rel in (
                 "node_modules/@openai/codex-darwin-arm64/vendor/aarch64-apple-darwin/bin/codex",
                 "node_modules/@openai/codex-darwin-x64/vendor/x86_64-apple-darwin/bin/codex",
+                "node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/bin/codex",
+                "node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/bin/codex",
                 "vendor/aarch64-apple-darwin/bin/codex",
                 "vendor/x86_64-apple-darwin/bin/codex",
+                "vendor/x86_64-unknown-linux-musl/bin/codex",
+                "vendor/aarch64-unknown-linux-musl/bin/codex",
             ):
                 cand = pkg_root / rel
                 if cand.is_file() and os.access(str(cand), os.X_OK):
@@ -349,8 +361,11 @@ def read_agy_auth(profile: str) -> Dict[str, Any]:
 
 def list_agy_profiles(current_profile: Optional[str] = None) -> List[Dict[str, Any]]:
     profiles: List[Dict[str, Any]] = []
-    if AGY_PROFILES_DIR.is_dir():
-        for entry in sorted(AGY_PROFILES_DIR.iterdir(), key=lambda x: x.name):
+    try:
+        agy_entries = sorted(AGY_PROFILES_DIR.iterdir(), key=lambda x: x.name) if AGY_PROFILES_DIR.is_dir() else []
+    except OSError:
+        agy_entries = []
+    for entry in agy_entries:
             if not entry.is_dir() or not _is_valid_profile_name(entry.name):
                 continue
             tf = entry / ".gemini/antigravity-cli/antigravity-oauth-token"
@@ -393,8 +408,11 @@ def list_agy_profiles(current_profile: Optional[str] = None) -> List[Dict[str, A
                 "is_current": current_profile == CODEX_PROFILE_NAME,
             }
         )
-    if CODEX_PROFILES_DIR.is_dir():
-        for entry in sorted(CODEX_PROFILES_DIR.iterdir(), key=lambda x: x.name):
+    try:
+        codex_entries = sorted(CODEX_PROFILES_DIR.iterdir(), key=lambda x: x.name) if CODEX_PROFILES_DIR.is_dir() else []
+    except OSError:
+        codex_entries = []
+    for entry in codex_entries:
             if not entry.is_dir() or not _is_valid_profile_name(entry.name) or entry.name == CODEX_PROFILE_NAME:
                 continue
             c_logged, c_email = _read_codex_auth_hint(entry.name)
@@ -408,6 +426,9 @@ def list_agy_profiles(current_profile: Optional[str] = None) -> List[Dict[str, A
                 }
             )
     return profiles
+
+
+DEFAULT_AGY_PROFILE = _detect_default_profile()
 
 
 def resolve_agy_binary(for_profile: Optional[str] = None) -> str:

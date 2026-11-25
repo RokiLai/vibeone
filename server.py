@@ -8,6 +8,7 @@ import os
 import secrets
 import shutil
 import subprocess
+import sys
 import time
 import uuid
 from contextlib import asynccontextmanager
@@ -51,11 +52,16 @@ _AUTH_WINDOW_SECONDS = 300.0
 _AUTH_LOCK_SECONDS = 60.0
 
 
+_TRUSTED_PROXY_HOSTS = {"127.0.0.1", "::1", "localhost"}
+
+
 def _get_client_ip(request: Request) -> str:
-    real_ip = (request.headers.get("x-real-ip") or "").strip()
-    if real_ip:
-        return real_ip
-    return request.client.host if request.client else "unknown"
+    peer_host = request.client.host if request.client else "unknown"
+    if peer_host in _TRUSTED_PROXY_HOSTS:
+        real_ip = (request.headers.get("x-real-ip") or "").strip()
+        if real_ip:
+            return real_ip
+    return peer_host
 
 
 def _check_auth_rate_limit(client_ip: str) -> None:
@@ -156,7 +162,10 @@ auth_flow_manager = ProfileAuthFlowManager(manager)
 
 
 def _spawn_launchd_restart(delay_sec: float = 0.5) -> None:
-    """Spawn a detached helper via posix_spawn to kickstart the LaunchAgent."""
+    """Spawn a detached helper via posix_spawn to kickstart the macOS LaunchAgent."""
+    if sys.platform != "darwin" or not os.path.isfile("/bin/launchctl"):
+        logger.warning("Deferred LaunchAgent restart is only supported on macOS with /bin/launchctl")
+        return
     target_uid = str(os.getuid())
     safe_delay = f"{max(0.1, float(delay_sec)):.2f}"
     subprocess.Popen(

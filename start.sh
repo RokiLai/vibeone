@@ -6,9 +6,19 @@ cd "$SCRIPT_DIR"
 
 # Load local .env if present (without overriding explicitly passed env vars)
 if [[ -f "$SCRIPT_DIR/.env" ]]; then
-  while IFS='=' read -r k v; do
-    [[ -z "$k" || "$k" =~ ^[[:space:]]*# ]] && continue
-    k="${k// /}"
+  while IFS='=' read -r k v || [[ -n "$k" ]]; do
+    k="${k%$'\r'}"
+    v="${v%$'\r'}"
+    k="${k#"${k%%[![:space:]]*}"}"
+    k="${k%"${k##*[![:space:]]}"}"
+    [[ -z "$k" || "$k" == \#* ]] && continue
+    v="${v#"${v%%[![:space:]]*}"}"
+    v="${v%"${v##*[![:space:]]}"}"
+    if [[ ${#v} -ge 2 ]]; then
+      if [[ ( "$v" == \"*\" ) || ( "$v" == \'*\' ) ]]; then
+        v="${v:1:${#v}-2}"
+      fi
+    fi
     if [[ -z "${!k:-}" ]]; then
       export "$k=$v"
     fi

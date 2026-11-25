@@ -1,7 +1,7 @@
     function renderProfileHeader() {
       const lbl = $('profile-current-label');
       if (!lbl) return;
-      const p = state.currentProfile || 'agy2';
+      const p = state.currentProfile || 'default';
       lbl.textContent = state.currentProfileEmail ? `${p} · ${state.currentProfileEmail}` : `账号: ${p}`;
     }
 
