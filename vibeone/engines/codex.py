@@ -654,10 +654,20 @@ class CodexAppServerManager(AgyACPManager):
                     thread_obj = load_res.get("thread") or {}
                     loaded_sid = str(thread_obj.get("id") or saved_sid)
                     self.session_id = loaded_sid
+                    thread_name = str(thread_obj.get("name") or "").strip()
+                    preview_title = str(thread_obj.get("preview") or "").strip()
+                    if preview_title:
+                        preview_title = " ".join(preview_title.split())[:60]
+                    resolved_title = (
+                        thread_name
+                        or self._resolve_stored_session_title(loaded_sid, fallback="")
+                        or preview_title
+                        or "Codex"
+                    )
                     rt = self._get_or_create_runtime(
                         loaded_sid,
                         workdir=self.workdir,
-                        title=thread_obj.get("name") or self.store.get_meta("session_title", "Codex"),
+                        title=resolved_title,
                     )
                     rt.loaded_in_acp = True
                     self._apply_codex_session_meta(load_res, rt=rt)

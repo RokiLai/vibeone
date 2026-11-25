@@ -46,6 +46,7 @@ class SessionRuntime:
         self.queued_prompts: List[Dict[str, Any]] = []
         self.steer_next_prompt: Optional[Dict[str, Any]] = None
         self.cancel_requested: bool = False
+        self.unsolicited_push_task: Optional[asyncio.Task] = None
 
 
 class AgyACPManager:
@@ -154,7 +155,7 @@ class AgyACPManager:
 
         saved_sid = self._get_profile_session_id()
         if saved_sid:
-            saved_title = self.store.get_meta("session_title", "VibeOne")
+            saved_title = self._resolve_stored_session_title(saved_sid, fallback="VibeOne")
             rt = self._get_or_create_runtime(saved_sid, workdir=self.workdir, title=saved_title)
             if not rt.current_model and self._fallback_model:
                 rt.current_model = self._fallback_model
@@ -234,6 +235,14 @@ class AgyACPManager:
             pass
         return None
 
+    def _resolve_stored_session_title(self, sid: str, fallback: str = "会话") -> str:
+        """Look up a session's own persisted title in `sessions` without leaking global meta across profiles."""
+        stored = self.store.get_session(sid)
+        stored_title = str(stored.get("title") or "").strip() if stored else ""
+        if stored_title:
+            return stored_title
+        return fallback
+
     def _get_or_create_runtime(
         self,
         sid: str,
@@ -262,7 +271,7 @@ class AgyACPManager:
         else:
             if workdir:
                 rt.workdir = self._canonical_workdir(workdir) or rt.workdir
-            if title and title not in ("会话", "新会话", "Agy Remote", "VibeOne"):
+            if title and title not in ("会话", "新会话", "Agy Remote", "VibeOne", "Codex"):
                 rt.title = title
         return rt
 
@@ -598,7 +607,7 @@ class AgyACPManager:
                     rt = self._get_or_create_runtime(
                         loaded_sid,
                         workdir=self.workdir,
-                        title=self.store.get_meta("session_title", "VibeOne"),
+                        title=self._resolve_stored_session_title(loaded_sid, fallback="VibeOne"),
                     )
                     rt.loaded_in_acp = True
                     self._apply_session_meta(load_res, rt=rt)
@@ -2004,6 +2013,8 @@ class AgyACPManager:
                 fut.cancel()
         self._pending_rpc.clear()
 
+        for rt in self._runtimes.values():
+            self._cancel_unsolicited_push(rt)
         tasks = [t for t in (self._stdout_task, self._stderr_task) if t and not t.done()]
         self._stdout_task = None
         self._stderr_task = None
@@ -2507,11 +2518,15 @@ class AgyACPManager:
                 },
                 sid=target_sid,
             )
+            if not rt.is_busy:
+                self._schedule_unsolicited_push(rt)
 
         elif kind == "agent_thought_chunk":
             if not rt:
                 return
             rt.active_assistant_id = None
+            if not rt.is_busy:
+                self._cancel_unsolicited_push(rt)
             text = self._extract_content_text(update.get("content"))
             if not text:
                 return
@@ -2537,6 +2552,8 @@ class AgyACPManager:
                 return
             rt.active_assistant_id = None
             rt.active_thought_id = None
+            if not rt.is_busy:
+                self._cancel_unsolicited_push(rt)
             tc_id = update.get("toolCallId") or f"tc_{uuid.uuid4().hex[:10]}"
             item_id = f"tool_{tc_id}"
             existing = rt.items_by_id.get(item_id)
@@ -2841,6 +2858,7 @@ class AgyACPManager:
         self.store.upsert_session(sid, rt.workdir, rt.title, touch=True, profile=self.current_profile)
         await self.broadcast({"type": "item_upsert", "data": user_item}, sid=sid)
 
+        self._cancel_unsolicited_push(rt)
         rt.is_busy = True
         rt.cancel_requested = False
         rt.active_assistant_id = None
@@ -3135,6 +3153,59 @@ class AgyACPManager:
 
         task.add_done_callback(_on_push_done)
         return task
+
+    def _cancel_unsolicited_push(self, rt: SessionRuntime) -> None:
+        task = rt.unsolicited_push_task
+        rt.unsolicited_push_task = None
+        if task and not task.done():
+            task.cancel()
+
+    def _schedule_unsolicited_push(self, rt: SessionRuntime, delay: float = 4.0) -> None:
+        """Debounce WebPush notifications for unsolicited background updates (e.g. /schedule)."""
+        self._cancel_unsolicited_push(rt)
+        sid = rt.session_id
+
+        async def _delayed_notify() -> None:
+            try:
+                await asyncio.sleep(delay)
+                if rt.is_busy or self._runtimes.get(sid) is not rt:
+                    return
+                rt.active_assistant_id = None
+                self.store.upsert_session(sid, rt.workdir, rt.title, touch=True, profile=self.current_profile)
+                await self.broadcast({"type": "sessions_changed"})
+                label = rt.title or sid[:8]
+                last_asst = ""
+                for it in reversed(rt.items):
+                    if it.get("type") == "assistant" and str(it.get("text") or "").strip():
+                        last_asst = " ".join(str(it["text"]).split())[:110]
+                        break
+                non_viewers = self._non_viewers_for_session(sid)
+                if non_viewers:
+                    await self.broadcast(
+                        {
+                            "type": "toast",
+                            "data": {
+                                "level": "info",
+                                "message": f"后台会话「{label}」有新消息",
+                            },
+                        },
+                        targets=non_viewers,
+                    )
+                self._schedule_push_if_unseen(
+                    sid,
+                    title=f"后台任务更新 · {label}",
+                    body=last_asst or "收到新的后台消息，点击查看",
+                    tag=f"agy-bg-{sid}",
+                )
+            except asyncio.CancelledError:
+                return
+            except Exception as exc:
+                logger.warning("Unsolicited background push failed (sid=%s): %s", sid[:8], exc)
+            finally:
+                if rt.unsolicited_push_task is asyncio.current_task():
+                    rt.unsolicited_push_task = None
+
+        rt.unsolicited_push_task = asyncio.create_task(_delayed_notify())
 
     async def cancel_current_turn(self, sid: Optional[str] = None) -> None:
         target_sid = sid or self.session_id

@@ -185,6 +185,27 @@ class SessionHistorySyncTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(any(b.get("type") == "snapshot" for b in broadcasts))
         self.assertEqual(len(self.store.load_items(sid)), 3)
 
+    def test_init_preserves_per_profile_session_title_over_global_meta(self) -> None:
+        from vibeone.engines.codex import CodexAppServerManager
+
+        self.store.upsert_session("sid-agy2", str(self.workdir), "Reporting A Bug", profile="agy2")
+        self.store.upsert_session("sid-codex", str(self.workdir), "仓库公开前检查", profile="codex")
+        self.store.upsert_session("sid-agy1", str(self.workdir), "排查本地网络", profile="agy")
+        self.store.set_meta(
+            "active_sessions_by_profile",
+            {"agy2": "sid-agy2", "codex": "sid-codex", "agy": "sid-agy1"},
+        )
+        # Global meta holds another profile's latest title
+        self.store.set_meta("session_title", "Reporting A Bug")
+
+        codex_mgr = CodexAppServerManager(str(self.workdir), self.store, profile="codex")
+        agy_mgr = AgyACPManager(str(self.workdir), self.store, profile="agy")
+
+        self.assertEqual(codex_mgr._get_or_create_runtime("sid-codex").title, "仓库公开前检查")
+        self.assertEqual(self.store.get_session("sid-codex")["title"], "仓库公开前检查")
+        self.assertEqual(agy_mgr._get_or_create_runtime("sid-agy1").title, "排查本地网络")
+        self.assertEqual(self.store.get_session("sid-agy1")["title"], "排查本地网络")
+
 
 if __name__ == "__main__":
     unittest.main()
