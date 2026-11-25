@@ -6,17 +6,29 @@ VibeOne 是一个自托管的网页控制台，连接运行在你电脑上的 **
 
 ## 演示
 
-用手机查看阅读清单项目的任务进度，展开搜索功能的 Git Diff，再发一条消息要求补充空结果提示。
+打开手机侧边栏，在两个示例项目里找到正在运行的会话。进入后查看进度、展开 Git Diff，再发一条消息让 Agent 补一个空结果提示。
 
-<img src="docs/demo/mobile-workflow.gif" width="360" alt="VibeOne 移动端演示：查看运行中的任务、展开 Git Diff、发送后续指令">
+<p>
+  <img src="docs/demo/mobile-workflow.gif" width="340" alt="VibeOne 移动端动图：从侧边栏进入运行中的会话、审阅 Diff、发送后续指令">
+  <img src="docs/demo/sidebar.png" width="340" alt="VibeOne 移动端侧边栏：项目分组、历史会话、运行中和待确认任务">
+</p>
 
-演示使用真实的 VibeOne 界面和模拟任务数据。[查看静态截图](docs/demo/mobile.png)。
+演示使用真实的 VibeOne 界面和模拟任务数据。[查看会话静态截图](docs/demo/mobile.png)。
 
 ## 为什么用 VibeOne
 
 - **离开电脑也能接着做。** 手机浏览器可以查看流式输出、审阅 Diff、审批权限和发送后续指令。在 iOS 上添加到主屏幕后，还可以接收任务完成和待审批的 Web Push 通知。
 - **多个项目可以同时推进。** 在同一界面切换工作目录和会话，查看后台任务。会话记录保存在本地 SQLite，回来后可以继续之前的上下文。
 - **在同一个界面管理两种 CLI。** 支持 Codex 和 Antigravity 的多账号切换，可提前启动已登录的账号，并按账号记住模型和推理设置。
+
+## 安装前需要准备什么
+
+| 使用方式 | 需要准备 |
+| --- | --- |
+| 只在运行 Agent 的电脑上使用 | Python 3.9+、Git、至少一个已登录的 Codex CLI 或 Antigravity CLI，以及自己生成的 VibeOne 登录令牌。 |
+| 用自己的手机远程访问 | 电脑保持开机联网，手机和电脑加入同一个 Tailscale 私有网络。Tailscale Serve 提供 HTTPS 地址，无需自购域名或转发路由器端口。 |
+| 通过公网域名访问 | 域名或子域名、指向公网入口的 DNS 记录、可从外网到达的 TCP 80/443、Caddy，以及只允许受信任用户访问的入口控制。 |
+| 在 iPhone 接收 Web Push | 手机能访问的可信 HTTPS 地址、部署者的联系邮箱，以及主屏幕应用的通知权限。 |
 
 ## 快速开始
 
@@ -89,16 +101,35 @@ VIBEONE_WORKDIR=/path/to/your/workspace
 
 VibeOne 面向单用户自托管。Web 登录后可以访问本机工作区、会话和已登录的 Agent。保留服务的回环监听，通过 VPN 或带访问控制的 HTTPS 代理提供远程访问，仅向受信任的用户和设备开放。Codex 的 `auto` 模式允许写入工作区和联网，无需逐次审批。`full-access` 会关闭 Codex 的文件沙箱。
 
-iOS Web Push 需要 HTTPS。将 `VIBEONE_VAPID_SUBJECT` 设置为部署者的实际联系邮箱，然后按以下步骤配置。
+### 用 Tailscale 从自己的手机访问
 
-1. 参考 [Caddyfile.example](Caddyfile.example) 复制为 `Caddyfile`，替换为你的域名与本地端口。
-2. 启动 VibeOne 与 Caddy：
+1. 在电脑和手机安装并登录 Tailscale，将两台设备加入同一个私有网络。为该网络启用 MagicDNS 和 HTTPS 证书。
+2. 在电脑上启动 VibeOne，保留默认监听地址 `127.0.0.1:8765`。在同一台电脑的另一个终端运行：
+
+   ```bash
+   tailscale serve --bg http://127.0.0.1:8765
+   ```
+
+3. 手机连接 Tailscale 后，打开命令输出的 `https://…ts.net` 地址，再用 VibeOne 的令牌登录。[Tailscale Serve 文档](https://tailscale.com/docs/reference/tailscale-cli/serve)
+
+### 用 Caddy 和域名提供公网 HTTPS
+
+1. 将域名或子域名的 DNS `A` 或 `AAAA` 记录指向公网入口。确认 TCP 80/443 能到达 Caddy。家用路由器通常需要端口转发。如果宽带使用运营商级 NAT（CGNAT）且没有可用的公网 IPv6，单靠路由器转发通常无法建立公网入口，可以使用上面的私有访问方案。
+2. 安装 Caddy，把 [Caddyfile.example](Caddyfile.example) 复制成 `Caddyfile`，填入自己的域名，并确保代理端口与 VibeOne 的监听端口一致。公网入口应配置额外的身份验证或 IP 允许列表。示例负责 HTTPS 和反向代理，入口访问控制由部署者配置。
+3. 保持 VibeOne 监听在回环地址，只对外开放代理入口。分别启动 VibeOne 和 Caddy：
+
    ```bash
    ./start.sh
    caddy run --config Caddyfile
    ```
-3. 在 iPhone Safari 中打开你的 HTTPS 域名 → 点击分享按钮 → **添加到主屏幕**。
-4. 从主屏幕打开 VibeOne，在设置中开启推送通知即可在后台接收任务完成与权限审批提醒。
+
+   Caddy 会尝试自动签发并续期证书。[Caddy 自动 HTTPS 前提](https://caddyserver.com/docs/automatic-https)
+
+### 在 iPhone 接收通知
+
+1. 将 `VIBEONE_VAPID_SUBJECT` 设置为部署者的实际联系邮箱，并重启 VibeOne。
+2. 在 iPhone Safari 打开可信的 HTTPS 地址，使用分享菜单中的 **添加到主屏幕**。
+3. 从主屏幕打开 VibeOne，在设置中启用 Web Push，并允许系统通知。
 
 ## 开发与测试
 
