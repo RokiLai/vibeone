@@ -68,11 +68,17 @@
   <!-- Auth Overlay -->
   <div id="auth-overlay" class="fixed inset-0 z-50 hidden flex items-center justify-center bg-[#0b0f17]/95 backdrop-blur-md p-6">
     <div class="w-full max-w-sm rounded-2xl border border-border bg-surface p-6 shadow-2xl">
-      <div class="flex items-center gap-3 mb-4">
-        <img src="/icon-192.png?v=3" alt="VibeOne" class="w-10 h-10 rounded-xl" />
-        <div>
-          <h1 class="text-lg font-semibold text-white">VibeOne</h1>
-          <p class="text-xs text-slate-400">请输入访问密钥 (VIBEONE_WEB_TOKEN)</p>
+      <div class="flex items-center justify-between gap-2 mb-4">
+        <div class="flex items-center gap-3 min-w-0">
+          <img src="/icon-192.png?v=3" alt="VibeOne" class="w-10 h-10 rounded-xl shrink-0" />
+          <div class="min-w-0">
+            <h1 class="text-lg font-semibold text-white">VibeOne</h1>
+            <p class="text-xs text-slate-400">请输入访问密钥 (VIBEONE_WEB_TOKEN)</p>
+          </div>
+        </div>
+        <div class="inline-flex items-center rounded-lg border border-border bg-bg p-0.5 shrink-0" data-i18n-skip="1">
+          <button type="button" data-lang-choice="zh" class="px-2 py-1 rounded-md text-[11px] font-medium border border-transparent transition">中文</button>
+          <button type="button" data-lang-choice="en" class="px-2 py-1 rounded-md text-[11px] font-medium border border-transparent transition">EN</button>
         </div>
       </div>
       <form id="auth-form" class="space-y-3" method="post" action="/api/auth">
@@ -581,8 +587,28 @@
 
       <!-- Settings Main View -->
       <div id="settings-main-view" class="flex-1 overflow-y-auto p-4 space-y-4 safe-bottom text-xs">
-        <!-- Session Management / Archived -->
+        <!-- Language Switcher -->
         <div class="space-y-2">
+          <div>
+            <div class="text-xs font-medium text-slate-200">语言</div>
+            <div class="text-[11px] text-slate-400 mt-0.5">切换界面显示语言（立即生效）</div>
+          </div>
+          <div class="grid grid-cols-2 gap-2" data-i18n-skip="1">
+            <button
+              type="button"
+              data-lang-choice="zh"
+              class="px-3 py-2 rounded-xl border border-border bg-bg hover:bg-card active:scale-[0.99] text-slate-300 font-medium transition"
+            >简体中文</button>
+            <button
+              type="button"
+              data-lang-choice="en"
+              class="px-3 py-2 rounded-xl border border-border bg-bg hover:bg-card active:scale-[0.99] text-slate-300 font-medium transition"
+            >English</button>
+          </div>
+        </div>
+
+        <!-- Session Management / Archived -->
+        <div class="pt-3 border-t border-border/60 space-y-2">
           <div>
             <div class="text-xs font-medium text-slate-200">会话管理</div>
             <div class="text-[11px] text-slate-400 mt-0.5">查看或恢复已归档的历史会话</div>
@@ -865,6 +891,7 @@
   <!-- Toast Container -->
   <div id="toast" class="hidden fixed top-16 left-1/2 -translate-x-1/2 z-50 px-4 py-2 rounded-full bg-slate-900/95 border border-border text-xs text-slate-100 shadow-xl whitespace-nowrap max-w-[90vw] truncate"></div>
 
+  <script src="/static/app-i18n.js"></script>
   <script src="/static/app-bootstrap.js"></script>
   <script src="/static/app-sidebar-gestures.js"></script>
   <script src="/static/app-sidebar.js"></script>

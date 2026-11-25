@@ -13,6 +13,7 @@ const PRECACHE_URLS = [
   '/vendor/marked.min.js',
   '/vendor/highlight.min.js',
   '/static/app.css',
+  '/static/app-i18n.js',
   '/static/app-bootstrap.js',
   '/static/app-sidebar-gestures.js',
   '/static/app-sidebar.js',

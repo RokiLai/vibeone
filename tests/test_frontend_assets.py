@@ -11,6 +11,7 @@ import server
 
 
 APP_SCRIPTS = [
+    "/static/app-i18n.js",
     "/static/app-bootstrap.js",
     "/static/app-sidebar-gestures.js",
     "/static/app-sidebar.js",

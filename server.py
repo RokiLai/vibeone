@@ -425,6 +425,7 @@ async def serve_vendor_asset(filename: str):
 
 _STATIC_MEDIA_TYPES = {
     "app.css": "text/css; charset=utf-8",
+    "app-i18n.js": "application/javascript; charset=utf-8",
     "app-bootstrap.js": "application/javascript; charset=utf-8",
     "app-sidebar-gestures.js": "application/javascript; charset=utf-8",
     "app-sidebar.js": "application/javascript; charset=utf-8",
