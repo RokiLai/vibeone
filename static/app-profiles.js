@@ -17,8 +17,8 @@
           const isReloading = state.reloadingProfile === p.name;
           const sub = logged ? (p.email || '已登录') : '未登录（点击登录）';
           const engineTag = p.backend === 'codex'
-            ? '<span class="ml-1 px-1 rounded bg-emerald-500/20 text-emerald-300 text-[9px] border border-emerald-500/30 shrink-0">Codex</span>'
-            : '<span class="ml-1 px-1 rounded bg-blue-500/20 text-blue-300 text-[9px] border border-blue-500/30 shrink-0">Agy</span>';
+            ? '<span class="mr-1.5 w-[36px] text-center py-[1px] rounded bg-emerald-500/20 text-emerald-300 text-[9px] border border-emerald-500/30 shrink-0">Codex</span>'
+            : '<span class="mr-1.5 w-[36px] text-center py-[1px] rounded bg-blue-500/20 text-blue-300 text-[9px] border border-blue-500/30 shrink-0">Agy</span>';
           const busyTag = p.busy_count > 0 ? '<span class="ml-1 px-1 rounded bg-indigo-500/25 text-indigo-300 text-[9px]">运行中</span>' : '';
           let rightLabel = '去登录';
           let rightClass = 'text-amber-300';
@@ -53,8 +53,8 @@
                 }"
               >
                 <span class="min-w-0 truncate flex items-center">
-                  <span class="font-medium shrink-0">${escapeHtml(p.name)}</span>
                   ${engineTag}
+                  <span class="font-medium shrink-0">${escapeHtml(p.name)}</span>
                   <span class="text-[10px] opacity-80 ml-1 truncate">${escapeHtml(sub)}</span>
                   ${busyTag}
                 </span>
