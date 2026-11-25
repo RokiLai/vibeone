@@ -2,50 +2,37 @@
 
 **在手机上接手电脑上的 AI 编程任务。**
 
-VibeOne 是一个自托管的网页控制台，连接运行在你电脑上的 **Codex CLI** 和 **Antigravity CLI**。比如你出门前让 Codex 修一个 bug，路上可以用手机看它做到哪一步、打开 Git Diff 审阅改动、处理权限请求，再发一条消息让它继续。Agent 在你的电脑上运行，项目文件和 VibeOne 的会话记录保存在本机。
+VibeOne 是一个自托管的网页控制台，直连运行在你本机的 **OpenAI Codex CLI** 和 **Antigravity CLI**。出门前让 Agent 开始修 bug 或重构，路上就能用手机查看实时进度、审阅 Git Diff、审批权限并继续发指令；所有代码、会话记录和账号凭证都保留在你自己的电脑上。
 
-## 演示
-
-打开手机侧边栏，在两个示例项目里找到正在运行的会话。进入后查看进度、展开 Git Diff，再发一条消息让 Agent 补一个空结果提示。
-
-<p>
-  <img src="docs/demo/mobile-workflow.gif" width="340" alt="VibeOne 移动端动图：从侧边栏进入运行中的会话、审阅 Diff、发送后续指令">
-  <img src="docs/demo/sidebar.png" width="340" alt="VibeOne 移动端侧边栏：项目分组、历史会话、运行中和待确认任务">
+<p align="center">
+  <img src="docs/demo/mobile-workflow.gif" width="250" alt="VibeOne 移动端动图：切换运行中的会话、审阅 Diff、发送后续指令">
+  <img src="docs/demo/sidebar.png" width="250" alt="VibeOne 移动端侧边栏：项目分组、运行中和待确认任务">
+  <img src="docs/demo/ios-push.jpg" width="250" alt="iPhone 通知中心收到的 VibeOne Web Push 推送">
 </p>
 
-演示使用真实的 VibeOne 界面和模拟任务数据。[查看会话静态截图](docs/demo/mobile.png)。
+> 演示界面使用模拟任务数据，另附[静态会话截图](docs/demo/mobile.png)。
 
-## 为什么用 VibeOne
+---
 
-- **离开电脑也能接着做。** 手机浏览器可以查看流式输出、审阅 Diff、审批权限和发送后续指令。在 iOS 上添加到主屏幕后，还可以接收任务完成和待审批的 Web Push 通知。
-- **多个项目可以同时推进。** 在同一界面切换工作目录和会话，查看后台任务。会话记录保存在本地 SQLite，回来后可以继续之前的上下文。
-- **在同一个界面管理两种 CLI。** 支持 Codex 和 Antigravity 的多账号切换，可提前启动已登录的账号，并按账号记住模型和推理设置。
+## 核心特性
 
-## 工作原理
+- **离开电脑也能继续推进**：手机浏览器支持流式输出、Git Diff 审阅、权限审批和继续对话；iOS 添加到主屏幕后，可在任务完成或等待审批时收到系统级 Web Push 通知。
+- **多项目并行管理**：在同一界面切换工作目录和会话，随时查看后台运行中的任务，会话历史保存在本地 SQLite。
+- **双引擎多账号秒切**：统一管理 Codex 和 Antigravity 的多个账号，启动时自动后台预热已登录账号，并按账号记住模型与推理设置。
+- **基于官方 CLI 本地直连**：本机通过标准输入输出调用 `codex app-server --stdio` 与 `agy acp --stdio`（[Codex 集成指南](https://developers.openai.com/blog/codex-as-a-platform) · [Antigravity ACP 文档](https://antigravity.google/docs/cli/acp/)），使用你自己的 CLI 登录身份，不经过第三方中转服务器。
 
-手机浏览器通过 WebSocket 连接你电脑上的 VibeOne。VibeOne 在本机启动官方 CLI，通过标准输入输出与它们通信，转发消息、任务进度和权限请求。Codex 使用 `codex app-server --stdio`，Antigravity 使用 `agy acp --stdio`。
-
-两种接入方式都有官方文档。CLI 使用你自己的登录身份调用模型，账号权限、额度和服务条款仍由对应平台决定。 [OpenAI Codex 集成指南](https://developers.openai.com/blog/codex-as-a-platform) · [Google Antigravity ACP 文档](https://antigravity.google/docs/cli/acp/)
-
-## 安装前需要准备什么
-
-| 使用方式 | 需要准备 |
-| --- | --- |
-| 只在运行 Agent 的电脑上使用 | Python 3.9+、Git、至少一个已登录的 Codex CLI 或 Antigravity CLI，以及自己生成的 VibeOne 登录令牌。 |
-| 用自己的手机远程访问 | 电脑保持开机联网，手机和电脑加入同一个 Tailscale 私有网络。Tailscale Serve 提供 HTTPS 地址，无需自购域名或转发路由器端口。 |
-| 通过公网域名访问 | 域名或子域名、指向公网入口的 DNS 记录、可从外网到达的 TCP 80/443、Caddy，以及只允许受信任用户访问的入口控制。 |
-| 在 iPhone 接收 Web Push | 手机能访问的可信 HTTPS 地址、部署者的联系邮箱，以及主屏幕应用的通知权限。 |
+---
 
 ## 快速开始
 
-### 1. 环境要求
+### 环境要求
 
-- Python 3.9+
+- **Python 3.9+**、**Git**
 - 至少安装并登录以下 CLI 之一：
-  - **Antigravity CLI (`agy`)**：确保已在终端完成登录，多账号配置位于 `~/.config/agy/profiles/<name>`
-  - **OpenAI Codex CLI (`codex`)**：确保已在终端完成登录（`~/.codex` 或 `OPENAI_API_KEY`）
+  - **OpenAI Codex CLI (`codex`)**：已完成终端登录（`~/.codex` 或 `OPENAI_API_KEY`）
+  - **Antigravity CLI (`agy`)**：已完成终端登录（多账号位于 `~/.config/agy/profiles/<name>`）
 
-### 2. 安装依赖
+### 安装并启动
 
 ```bash
 git clone https://github.com/RokiLai/vibeone.git
@@ -53,40 +40,56 @@ cd vibeone
 
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
-```
 
-### 3. 配置 `.env`
-
-复制配置模板并编辑 `.env`（已被 `.gitignore` 忽略）：
-
-```bash
 cp .env.example .env
-```
+# 编辑 .env，至少将 VIBEONE_WEB_TOKEN 改为高强度随机字符串
 
-```dotenv
-# 必填：登录访问密钥（建议使用高强度随机字符串）
-VIBEONE_WEB_TOKEN=your-strong-random-token
-
-# 可选：监听地址与端口（默认 127.0.0.1:8765）
-VIBEONE_HOST=127.0.0.1
-VIBEONE_PORT=8765
-
-# 可选：默认工作目录（默认当前项目目录）
-VIBEONE_WORKDIR=/path/to/your/workspace
-
-# 可选：启用 Web Push 时，填写部署者的联系邮箱
-# VIBEONE_VAPID_SUBJECT=mailto:admin@example.com
-```
-
-### 4. 启动服务
-
-```bash
 ./start.sh
 ```
 
-启动后在浏览器访问 `http://127.0.0.1:8765`（或你配置的端口），输入 `VIBEONE_WEB_TOKEN` 即可使用。
+启动后访问 `http://127.0.0.1:8765`，输入 `VIBEONE_WEB_TOKEN` 即可登录使用。
+
+---
+
+## 手机远程访问与 iPhone 推送
+
+> **安全提示**：VibeOne 面向单用户自托管，登录后可访问本机工作区和已登录的 Agent。请保持默认回环监听（`127.0.0.1:8765`），仅通过私有网络或带访问控制的 HTTPS 代理暴露给受信任的设备。Codex 的 `auto` 模式允许写入工作区和联网，`full-access` 会关闭文件沙箱。
+
+### 方式一：Tailscale（推荐，零域名配置）
+
+1. 在电脑和手机登录同一个 Tailscale 网络，并在管理后台启用 MagicDNS 与 HTTPS 证书。
+2. 电脑上启动 VibeOne（保持监听 `127.0.0.1:8765`），另开终端运行：
+
+   ```bash
+   tailscale serve --bg http://127.0.0.1:8765
+   ```
+
+3. 手机连接 Tailscale 后，访问输出的 `https://…ts.net` 地址并用令牌登录（参考 [Tailscale Serve 文档](https://tailscale.com/docs/reference/tailscale-cli/serve)）。
+
+### 方式二：自有域名 + Caddy
+
+1. 将域名 DNS（`A`/`AAAA`）指向公网入口，确保 TCP 80/443 可到达 Caddy（若宽带为 CGNAT 且无公网 IPv6，请使用上面的 Tailscale 方案）。
+2. 复制 [Caddyfile.example](Caddyfile.example) 为 `Caddyfile`，替换为你的域名并按需配置额外的入口访问控制。
+3. 分别启动 VibeOne 与 Caddy：
+
+   ```bash
+   ./start.sh
+   caddy run --config Caddyfile
+   ```
+
+   Caddy 会自动签发并续期 TLS 证书（参考 [Caddy 自动 HTTPS](https://caddyserver.com/docs/automatic-https)）。
+
+### 开启 iPhone 推送通知（iOS PWA）
+
+1. 在 `.env` 中设置 `VIBEONE_VAPID_SUBJECT=mailto:your@domain.com`（须为合法域名邮箱，不能用 `@localhost`），重启 VibeOne。
+2. 在 iPhone Safari 打开上面的可信 HTTPS 地址，点击分享菜单 → **添加到主屏幕**。
+3. 从主屏幕图标打开 VibeOne，在应用设置中启用 Web Push 并允许系统通知。
+
+---
 
 ## 环境变量说明
+
+常用配置（完整模板见 [.env.example](.env.example)）：
 
 | 变量名 | 必填 | 默认值 | 说明 |
 | --- | --- | --- | --- |
@@ -94,56 +97,28 @@ VIBEONE_WORKDIR=/path/to/your/workspace
 | `VIBEONE_HOST` | 否 | `127.0.0.1` | 监听地址 |
 | `VIBEONE_PORT` | 否 | `8765` | 监听端口 |
 | `VIBEONE_WORKDIR` | 否 | 项目根目录 | 默认打开的工作目录 |
-| `VIBEONE_DEFAULT_MODE` | 否 | `auto` | 新建/恢复会话时的默认权限模式 |
-| `VIBEONE_PREWARM_PROFILES` | 否 | `all`（扫描全部已登录账号） | 启动时后台异步启动的账号列表（默认扫描全部已登录账号并并发异步启动，不分主次；也可逗号分隔指定账号，或设为 `none` / `off` 关闭自动启动） |
-| `VIBEONE_VAPID_SUBJECT` | 否 | `mailto:admin@example.com` | Web Push VAPID 联系邮箱（需使用合法域名，不能用 `@localhost`） |
-| `VIBEONE_MAX_UPLOAD_BYTES` | 否 | `26214400` (25MB) | 单张图片上传大小上限 |
-| `VIBEONE_LAUNCHD_LABEL` | 否 | `local.vibeone` | macOS LaunchAgent 服务标识（用于 `.restart_after_turn` 自动重启） |
-| `AGY_PROFILE` | 否 | 自动探测（优先已登录账号） | 首次启动默认选中的账号 |
-| `AGY_PROFILES_DIR` | 否 | `~/.config/agy/profiles` | Antigravity 多账号目录 |
-| `AGY_BIN` / `AGY_REAL_BIN` | 否 | 自动从 `~/.local/bin` 和 `PATH` 查找 | 指定 `agy` 可执行文件路径 |
-| `CODEX_BIN` | 否 | 自动从 `PATH` / Homebrew 查找 | 指定 `codex` 可执行文件路径 |
-| `CODEX_HOME` | 否 | `~/.codex` | 指定 Codex 配置目录 |
+| `VIBEONE_VAPID_SUBJECT` | 否 | `mailto:admin@example.com` | Web Push VAPID 联系邮箱（需合法域名） |
+
+<details>
+<summary>展开更多高级配置（权限模式、预热、CLI 路径、LaunchAgent）</summary>
+
+| 变量名 | 默认值 | 说明 |
+| --- | --- | --- |
+| `VIBEONE_DEFAULT_MODE` | `auto` | 新建/恢复会话时的默认权限模式 |
+| `VIBEONE_PREWARM_PROFILES` | `all` | 启动时后台异步预热的账号（`all` / 逗号分隔账号名 / `none`） |
+| `VIBEONE_MAX_UPLOAD_BYTES` | `26214400` (25MB) | 单张图片上传大小上限 |
+| `VIBEONE_LAUNCHD_LABEL` | `local.vibeone` | macOS LaunchAgent 标识（配合 `.restart_after_turn` 自动重启） |
+| `AGY_PROFILE` | 自动探测（优先已登录账号） | 首次启动默认选中的账号 |
+| `AGY_PROFILES_DIR` | `~/.config/agy/profiles` | Antigravity 多账号目录 |
+| `AGY_BIN` / `AGY_REAL_BIN` | 自动从 `~/.local/bin` 和 `PATH` 查找 | 指定 `agy` 可执行文件路径 |
+| `CODEX_BIN` | 自动从 `PATH` / Homebrew 查找 | 指定 `codex` 可执行文件路径 |
+| `CODEX_HOME` | `~/.codex` | 指定 Codex 配置目录 |
 
 > 路径查找顺序为「环境变量优先 → `PATH` 与常见目录自动发现」，换机部署无需修改源码。
 
-## HTTPS 远程访问与 iOS PWA
+</details>
 
-VibeOne 面向单用户自托管。Web 登录后可以访问本机工作区、会话和已登录的 Agent。保留服务的回环监听，通过 VPN 或带访问控制的 HTTPS 代理提供远程访问，仅向受信任的用户和设备开放。Codex 的 `auto` 模式允许写入工作区和联网，无需逐次审批。`full-access` 会关闭 Codex 的文件沙箱。
-
-### 用 Tailscale 从自己的手机访问
-
-1. 在电脑和手机安装并登录 Tailscale，将两台设备加入同一个私有网络。为该网络启用 MagicDNS 和 HTTPS 证书。
-2. 在电脑上启动 VibeOne，保留默认监听地址 `127.0.0.1:8765`。在同一台电脑的另一个终端运行：
-
-   ```bash
-   tailscale serve --bg http://127.0.0.1:8765
-   ```
-
-3. 手机连接 Tailscale 后，打开命令输出的 `https://…ts.net` 地址，再用 VibeOne 的令牌登录。[Tailscale Serve 文档](https://tailscale.com/docs/reference/tailscale-cli/serve)
-
-### 用 Caddy 和域名提供公网 HTTPS
-
-1. 将域名或子域名的 DNS `A` 或 `AAAA` 记录指向公网入口。确认 TCP 80/443 能到达 Caddy。家用路由器通常需要端口转发。如果宽带使用运营商级 NAT（CGNAT）且没有可用的公网 IPv6，单靠路由器转发通常无法建立公网入口，可以使用上面的私有访问方案。
-2. 安装 Caddy，把 [Caddyfile.example](Caddyfile.example) 复制成 `Caddyfile`，填入自己的域名，并确保代理端口与 VibeOne 的监听端口一致。公网入口应配置额外的身份验证或 IP 允许列表。示例负责 HTTPS 和反向代理，入口访问控制由部署者配置。
-3. 保持 VibeOne 监听在回环地址，只对外开放代理入口。分别启动 VibeOne 和 Caddy：
-
-   ```bash
-   ./start.sh
-   caddy run --config Caddyfile
-   ```
-
-   Caddy 会尝试自动签发并续期证书。[Caddy 自动 HTTPS 前提](https://caddyserver.com/docs/automatic-https)
-
-### 在 iPhone 接收通知
-
-1. 将 `VIBEONE_VAPID_SUBJECT` 设置为部署者的实际联系邮箱，并重启 VibeOne。
-2. 在 iPhone Safari 打开可信的 HTTPS 地址，使用分享菜单中的 **添加到主屏幕**。
-3. 从主屏幕打开 VibeOne，在设置中启用 Web Push，并允许系统通知。
-
-下面是 iPhone 通知中心收到的 VibeOne 测试推送。
-
-<img src="docs/demo/ios-push.jpg" width="340" alt="iPhone 通知中心显示 VibeOne 推送测试成功">
+---
 
 ## 开发与测试
 
@@ -155,10 +130,11 @@ VibeOne 面向单用户自托管。Web 登录后可以访问本机工作区、�
 .venv/bin/python -m unittest discover -s tests -v
 ```
 
-- 修改前端文件（`index.html`、`static/*`）刷新浏览器即可生效，无需重启后端。
-- 修改后端 Python 代码后需重启服务生效；如果通过 macOS LaunchAgent 托管运行，可在项目根目录创建 `.restart_after_turn` 触发当前回合结束后的无损自动重启。
+- 修改前端文件（`index.html`、`static/*`）刷新浏览器即生效，无需重启后端。
+- 修改后端 Python 代码需重启服务；若由 macOS LaunchAgent 托管，可在根目录创建 `.restart_after_turn` 触发当前回合结束后的无损重启。
 
-### 目录结构
+<details>
+<summary>查看项目目录结构</summary>
 
 ```text
 vibeone/
@@ -187,6 +163,10 @@ vibeone/
 └── tests/                  # 单元测试
 ```
 
+</details>
+
+---
+
 ## 许可证
 
-VibeOne 采用 [MIT 许可证](LICENSE)。随项目分发的第三方依赖遵循[各自的许可证](vendor/README.md)。
+VibeOne 采用 [MIT 许可证](LICENSE)。随项目分发的第三方前端依赖遵循[各自的许可证](vendor/README.md)。
