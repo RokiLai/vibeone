@@ -1025,8 +1025,10 @@ class CodexAppServerManager(AgyACPManager):
         async with self._session_lock:
             was_current = sid == self.session_id
             rt = self._runtimes.get(sid)
-            if rt and rt.is_busy:
-                await self.cancel_current_turn(sid=sid)
+            if rt:
+                self._cancel_unsolicited_push(rt)
+                if rt.is_busy:
+                    await self.cancel_current_turn(sid=sid)
             self._runtimes.pop(sid, None)
             self._unmark_session_empty(sid)
             self._delete_saved_usage(sid)
@@ -1036,11 +1038,7 @@ class CodexAppServerManager(AgyACPManager):
             self.store.delete_session(sid)
             self._invalidate_thread_cache()
 
-            if not was_current and self.connected:
-                try:
-                    await self._send_request("thread/unsubscribe", {"threadId": sid}, timeout=3.0)
-                except Exception:
-                    pass
+            await self._close_background_session(sid)
 
             affected_clients = self._clients_for_session(sid) if self._client_views is not None else []
             if was_current or affected_clients:
@@ -2018,6 +2016,13 @@ class CodexAppServerManager(AgyACPManager):
                 fut = self._turn_futures.get(sid)
                 if fut and not fut.done():
                     fut.set_exception(RuntimeError(str(err_obj.get("message") or "Codex error")))
+            return
+
+        if sid and (sid in self._get_hidden_sessions() or sid in self._get_archived_sessions()):
+            now = time.time()
+            if self.connected and (now - self._ignored_close_sent_at.get(sid, 0.0)) >= 30.0:
+                self._ignored_close_sent_at[sid] = now
+                asyncio.create_task(self._close_background_session(sid))
             return
 
         rt = self._get_or_create_runtime(sid) if sid else None

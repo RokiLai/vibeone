@@ -126,6 +126,7 @@ class AgyACPManager:
 
         # Ephemeral single-turn /btw side-question sessions (never persisted or listed)
         self._btw_sessions: Dict[str, Dict[str, Any]] = {}
+        self._ignored_close_sent_at: Dict[str, float] = {}
         self._btw_id_to_sid: Dict[str, str] = {}
 
         # Profile (multi-account) state
@@ -1596,11 +1597,12 @@ class AgyACPManager:
 
             for sid in target_sids:
                 rt = self._runtimes.get(sid)
-                if rt and rt.is_busy:
-                    await self.cancel_current_turn(sid=sid)
+                if rt:
+                    self._cancel_unsolicited_push(rt)
+                    if rt.is_busy:
+                        await self.cancel_current_turn(sid=sid)
                 self._runtimes.pop(sid, None)
-                if sid != self.session_id:
-                    await self._close_background_session(sid)
+                await self._close_background_session(sid)
 
             self._add_archived_sessions(target_set)
 
@@ -1687,8 +1689,10 @@ class AgyACPManager:
         async with self._session_lock:
             was_current = sid == self.session_id
             rt = self._runtimes.get(sid)
-            if rt and rt.is_busy:
-                await self.cancel_current_turn(sid=sid)
+            if rt:
+                self._cancel_unsolicited_push(rt)
+                if rt.is_busy:
+                    await self.cancel_current_turn(sid=sid)
             self._runtimes.pop(sid, None)
             self._unmark_session_empty(sid)
             self._delete_saved_usage(sid)
@@ -1697,12 +1701,8 @@ class AgyACPManager:
             self._add_hidden_sessions({sid})
             self.store.delete_session(sid)
 
-            # Best-effort ACP close when removing a non-current session
-            if not was_current and self.connected:
-                try:
-                    await self._send_request("session/close", {"sessionId": sid}, timeout=3.0)
-                except Exception:
-                    pass
+            # Best-effort ACP close for both current and background sessions
+            await self._close_background_session(sid)
 
             affected_clients = self._clients_for_session(sid) if self._client_views is not None else []
             if was_current or affected_clients:
@@ -1767,8 +1767,10 @@ class AgyACPManager:
 
             for msid in matching_sids:
                 mrt = self._runtimes.get(msid)
-                if mrt and mrt.is_busy:
-                    await self.cancel_current_turn(sid=msid)
+                if mrt:
+                    self._cancel_unsolicited_push(mrt)
+                    if mrt.is_busy:
+                        await self.cancel_current_turn(sid=msid)
                 self._runtimes.pop(msid, None)
 
             self._add_hidden_workdir(raw)
@@ -2492,6 +2494,13 @@ class AgyACPManager:
             self._append_replay_update(update)
             return
 
+        if sid and (sid in self._get_hidden_sessions() or sid in self._get_archived_sessions()):
+            now = time.time()
+            if self.connected and (now - self._ignored_close_sent_at.get(sid, 0.0)) >= 30.0:
+                self._ignored_close_sent_at[sid] = now
+                asyncio.create_task(self._close_background_session(sid))
+            return
+
         rt = self._get_or_create_runtime(sid) if sid else None
         target_sid = sid or None
 
@@ -3168,7 +3177,12 @@ class AgyACPManager:
         async def _delayed_notify() -> None:
             try:
                 await asyncio.sleep(delay)
-                if rt.is_busy or self._runtimes.get(sid) is not rt:
+                if (
+                    rt.is_busy
+                    or self._runtimes.get(sid) is not rt
+                    or sid in self._get_hidden_sessions()
+                    or sid in self._get_archived_sessions()
+                ):
                     return
                 rt.active_assistant_id = None
                 self.store.upsert_session(sid, rt.workdir, rt.title, touch=True, profile=self.current_profile)

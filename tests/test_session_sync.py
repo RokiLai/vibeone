@@ -1,3 +1,4 @@
+import asyncio
 import os
 import tempfile
 import time
@@ -205,6 +206,94 @@ class SessionHistorySyncTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.store.get_session("sid-codex")["title"], "仓库公开前检查")
         self.assertEqual(agy_mgr._get_or_create_runtime("sid-agy1").title, "排查本地网络")
         self.assertEqual(self.store.get_session("sid-agy1")["title"], "排查本地网络")
+
+    async def test_remove_and_archive_close_current_session_and_ignore_subsequent_updates(self) -> None:
+        mgr = AgyACPManager(str(self.workdir), self.store)
+        mgr.connected = True
+
+        sid_del = "sess_to_delete"
+        sid_arch = "sess_to_archive"
+        self.store.upsert_session(sid_del, str(self.workdir), "Delete Me")
+        self.store.upsert_session(sid_arch, str(self.workdir), "Archive Me")
+        self.store.replace_session_items(
+            sid_arch,
+            [{"id": "u1", "type": "user", "text": "keep", "images": [], "ts": 1.0}],
+        )
+
+        rt_del = mgr._get_or_create_runtime(sid_del, workdir=str(self.workdir), title="Delete Me")
+        mgr.session_id = sid_del
+        mgr._schedule_unsolicited_push(rt_del, delay=60.0)
+        pending_del_task = rt_del.unsolicited_push_task
+        self.assertIsNotNone(pending_del_task)
+
+        rpc_calls: List[tuple] = []
+        broadcasts: List[Dict[str, Any]] = []
+
+        async def fake_start() -> None:
+            return None
+
+        async def fake_broadcast(payload: Dict[str, Any], **kwargs) -> None:
+            broadcasts.append(payload)
+
+        async def fake_send_request(method: str, params: Dict[str, Any], timeout: float = 30.0) -> Dict[str, Any]:
+            rpc_calls.append((method, params))
+            if method == "session/new":
+                return {"sessionId": "sess_fresh"}
+            return {"sessionId": params.get("sessionId", "")}
+
+        async def fake_list_sessions(**kwargs) -> List[Dict[str, Any]]:
+            return []
+
+        mgr.start = fake_start  # type: ignore[method-assign]
+        mgr.broadcast = fake_broadcast  # type: ignore[method-assign]
+        mgr._send_request = fake_send_request  # type: ignore[method-assign]
+        mgr.list_sessions = fake_list_sessions  # type: ignore[method-assign]
+
+        # Remove current session -> cancels push task and sends session/close
+        await mgr.remove_session(sid_del)
+        await asyncio.sleep(0)
+        self.assertTrue(pending_del_task.cancelled())
+        self.assertIn(("session/close", {"sessionId": sid_del}), rpc_calls)
+
+        # Unsolicited update for deleted session must be ignored (no DB resurrection, no broadcast)
+        broadcasts.clear()
+        await mgr._handle_session_update(
+            {
+                "sessionId": sid_del,
+                "update": {
+                    "sessionUpdate": "agent_message_chunk",
+                    "content": {"type": "text", "text": "late schedule message"},
+                },
+            }
+        )
+        self.assertNotIn(sid_del, mgr._runtimes)
+        self.assertIsNone(self.store.get_session(sid_del))
+        self.assertEqual(broadcasts, [])
+
+        # Archive current session -> sends session/close and ignores subsequent updates
+        rt_arch = mgr._get_or_create_runtime(sid_arch, workdir=str(self.workdir), title="Archive Me")
+        mgr.session_id = sid_arch
+        mgr._schedule_unsolicited_push(rt_arch, delay=60.0)
+        pending_arch_task = rt_arch.unsolicited_push_task
+        rpc_calls.clear()
+        await mgr.archive_sessions([sid_arch])
+        await asyncio.sleep(0)
+        self.assertTrue(pending_arch_task.cancelled())
+        self.assertIn(("session/close", {"sessionId": sid_arch}), rpc_calls)
+
+        broadcasts.clear()
+        await mgr._handle_session_update(
+            {
+                "sessionId": sid_arch,
+                "update": {
+                    "sessionUpdate": "agent_message_chunk",
+                    "content": {"type": "text", "text": "late archived message"},
+                },
+            }
+        )
+        self.assertNotIn(sid_arch, mgr._runtimes)
+        self.assertEqual(len(self.store.load_items(sid_arch)), 1)
+        self.assertEqual(broadcasts, [])
 
 
 if __name__ == "__main__":
