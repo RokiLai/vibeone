@@ -1,0 +1,36 @@
+# Caddyfile.example - HTTPS reverse proxy for VibeOne
+#
+# Usage:
+#   1. Replace `vibeone.example.com` with your actual domain (DNS A/AAAA pointing to this host).
+#   2. Copy to Caddyfile: `cp Caddyfile.example Caddyfile`
+#   3. Start VibeOne locally on 127.0.0.1:8765:
+#        VIBEONE_WEB_TOKEN="your-strong-random-token" ./start.sh
+#   4. Start Caddy:
+#        caddy run --config Caddyfile
+#
+# Caddy automatically provisions and renews TLS certificates via Let's Encrypt
+# and transparently proxies HTTP + WebSocket (/ws) traffic.
+
+vibeone.example.com {
+    encode zstd gzip
+
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+        Referrer-Policy "no-referrer"
+    }
+
+    # Optional: limit upload size (e.g., 25MB for phone photos)
+    request_body {
+        max_size 25MB
+    }
+
+    reverse_proxy 127.0.0.1:8765 {
+        # Ensure low-latency streaming and clean WebSocket proxying
+        flush_interval -1
+        header_up Host {upstream_hostport}
+        header_up X-Real-IP {remote_host}
+        header_up X-Forwarded-Proto {scheme}
+    }
+}

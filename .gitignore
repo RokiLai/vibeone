@@ -1,0 +1,16 @@
+.venv/
+.env
+__pycache__/
+*.pyc
+uploads/*
+!uploads/.gitkeep
+vibeone.db
+vibeone.db-wal
+vibeone.db-shm
+agy_web.db
+agy_web.db-wal
+agy_web.db-shm
+Caddyfile
+.DS_Store
+.restart_after_turn
+.cache/

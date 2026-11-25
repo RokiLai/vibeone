@@ -1,0 +1,883 @@
+<!DOCTYPE html>
+<html lang="zh-CN" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <meta name="theme-color" content="#0b0f17" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black" />
+  <meta name="apple-mobile-web-app-title" content="VibeOne" />
+  <title>VibeOne</title>
+  <link rel="manifest" href="/manifest.json?v=3" />
+  <link rel="icon" type="image/png" sizes="64x64" href="/favicon.png?v=3" />
+  <link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png?v=3" />
+  <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png?v=3" />
+
+  <!-- Tailwind CSS (local vendor) -->
+  <script src="/vendor/tailwindcss.min.js"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            bg: '#0b0f17',
+            surface: '#111723',
+            card: '#171f30',
+            border: '#232f46',
+          }
+        }
+      }
+    };
+  </script>
+
+  <!-- marked.js, highlight.js & DOMPurify (local vendor) -->
+  <link rel="stylesheet" href="/vendor/github-dark.min.css" />
+  <script src="/vendor/purify.min.js"></script>
+  <script src="/vendor/marked.min.js"></script>
+  <script src="/vendor/highlight.min.js"></script>
+
+  <link rel="stylesheet" href="/static/app.css" />
+</head>
+<body>
+  <!-- Offline / Server Unreachable Overlay -->
+  <div id="offline-overlay" class="fixed inset-0 z-50 hidden flex items-center justify-center bg-[#0b0f17]/95 backdrop-blur-md p-6">
+    <div class="w-full max-w-sm rounded-2xl border border-border bg-surface p-6 shadow-2xl text-center space-y-4">
+      <div class="flex flex-col items-center gap-3">
+        <div class="relative">
+          <img src="/icon-192.png?v=3" alt="VibeOne" class="w-12 h-12 rounded-2xl opacity-90" />
+          <span class="absolute -right-1 -bottom-1 w-3.5 h-3.5 rounded-full bg-rose-500 ring-2 ring-surface"></span>
+        </div>
+        <div>
+          <h1 class="text-base font-semibold text-white">无法连接服务器</h1>
+          <p id="offline-detail" class="mt-1 text-xs text-slate-400 leading-relaxed">
+            当前处于离线状态或服务器暂时不可达，恢复网络后将自动重连。
+          </p>
+        </div>
+      </div>
+      <button
+        id="btn-offline-retry"
+        type="button"
+        class="w-full rounded-xl bg-blue-600 hover:bg-blue-500 active:scale-[0.99] transition py-3 text-sm font-medium text-white disabled:opacity-60"
+      >
+        重新连接
+      </button>
+    </div>
+  </div>
+
+  <!-- Auth Overlay -->
+  <div id="auth-overlay" class="fixed inset-0 z-50 hidden flex items-center justify-center bg-[#0b0f17]/95 backdrop-blur-md p-6">
+    <div class="w-full max-w-sm rounded-2xl border border-border bg-surface p-6 shadow-2xl">
+      <div class="flex items-center gap-3 mb-4">
+        <img src="/icon-192.png?v=3" alt="VibeOne" class="w-10 h-10 rounded-xl" />
+        <div>
+          <h1 class="text-lg font-semibold text-white">VibeOne</h1>
+          <p class="text-xs text-slate-400">请输入访问密钥 (VIBEONE_WEB_TOKEN)</p>
+        </div>
+      </div>
+      <form id="auth-form" class="space-y-3" method="post" action="/api/auth">
+        <input
+          id="auth-username-input"
+          type="text"
+          name="username"
+          value="vibeone"
+          autocomplete="username"
+          class="sr-only"
+          tabindex="-1"
+          aria-hidden="true"
+        />
+        <input
+          id="auth-token-input"
+          type="password"
+          name="password"
+          autocomplete="current-password"
+          placeholder="输入访问密码..."
+          class="w-full rounded-xl border border-border bg-bg px-3.5 py-3 text-sm text-white placeholder-slate-500 focus:border-blue-500 focus:outline-none"
+          required
+        />
+        <p id="auth-error" class="hidden text-xs text-rose-400"></p>
+        <button
+          type="submit"
+          class="w-full rounded-xl bg-blue-600 hover:bg-blue-500 active:scale-[0.99] transition py-3 text-sm font-medium text-white"
+        >
+          解锁并连接
+        </button>
+        <button
+          id="btn-passkey-login"
+          type="button"
+          class="hidden w-full rounded-xl border border-emerald-500/40 bg-emerald-500/15 hover:bg-emerald-500/25 active:scale-[0.99] transition py-3 text-sm font-medium text-emerald-200 flex items-center justify-center gap-2"
+        >
+          <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 5.25a3 3 0 013 3m3 0a6 6 0 01-7.029 5.912c-.563-.097-1.159.026-1.563.43L10.5 17.25H8.25v2.25H6v2.25H2.25v-2.818c0-.597.237-1.17.659-1.591l6.499-6.499c.404-.404.527-1 .43-1.563A6 6 0 1121.75 8.25z"/></svg>
+          <span>使用 Passkey / 面容解锁</span>
+        </button>
+      </form>
+    </div>
+  </div>
+
+  <!-- Main Remote Control Shell (Left Sidebar + Main Chat Canvas) -->
+  <div id="app">
+    <!-- Mobile Sidebar Backdrop -->
+    <div id="sidebar-backdrop" class="hidden fixed top-0 left-0 right-0 full-viewport-layer z-30 bg-black/65 backdrop-blur-[2px] lg:hidden"></div>
+
+    <!-- Left Sidebar (Always open on Desktop >=1024px, slide-over drawer on Mobile) -->
+    <aside
+      id="sidebar"
+      class="fixed top-0 left-0 full-viewport-layer z-40 w-[84vw] max-w-[300px] lg:static lg:h-full lg:w-[280px] lg:max-w-none shrink-0 bg-surface border-r border-border flex flex-col -translate-x-full lg:translate-x-0 transition-transform duration-200 ease-out"
+    >
+      <!-- Sidebar Brand Header -->
+      <div class="safe-top px-3.5 pb-3 border-b border-border/80 flex items-center justify-between gap-2 shrink-0">
+        <div class="flex items-center gap-2.5 min-w-0">
+          <img src="/icon-192.png?v=3" alt="VibeOne" class="w-6 h-6 rounded-lg shrink-0" />
+          <span class="text-sm font-semibold text-slate-100 truncate">VibeOne</span>
+          <span id="conn-dot" class="w-2 h-2 rounded-full bg-amber-400 shrink-0" title="连接状态"></span>
+        </div>
+        <div class="flex items-center gap-1 shrink-0">
+          <button
+            id="btn-sidebar-refresh"
+            type="button"
+            class="p-1.5 rounded-lg hover:bg-card text-slate-400 hover:text-slate-200 active:scale-95"
+            title="刷新会话列表"
+          >
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99"/></svg>
+          </button>
+          <button
+            id="btn-sidebar-close"
+            type="button"
+            class="lg:hidden p-1.5 rounded-lg hover:bg-card text-slate-400 hover:text-slate-200 active:scale-95"
+            title="关闭侧边栏"
+          >
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+          </button>
+        </div>
+      </div>
+
+      <!-- Profile / Account Switcher -->
+      <div class="px-3 py-2 border-b border-border/60 shrink-0 bg-bg/40">
+        <button
+          id="btn-profile-toggle"
+          type="button"
+          class="w-full flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-xl border border-border/80 bg-bg hover:bg-card active:scale-[0.99] text-xs transition"
+          title="切换 Antigravity 账号"
+        >
+          <span class="flex items-center gap-1.5 min-w-0">
+            <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0"></span>
+            <span id="profile-current-label" class="text-slate-200 font-medium truncate">账号: 加载中...</span>
+          </span>
+          <span class="text-[10px] text-slate-400 shrink-0 flex items-center gap-0.5">
+            <span>切换</span>
+            <svg id="profile-chevron" class="w-3 h-3 transition-transform" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5"/></svg>
+          </span>
+        </button>
+        <div id="profile-list" class="hidden mt-1.5 space-y-1"></div>
+      </div>
+
+      <!-- Sidebar Primary Actions + Search -->
+      <div class="p-3 space-y-2 border-b border-border/60 shrink-0">
+        <button
+          id="btn-sidebar-new"
+          type="button"
+          class="w-full py-2 px-3 rounded-xl bg-blue-600 hover:bg-blue-500 active:scale-[0.98] text-xs font-medium text-white flex items-center justify-center gap-1.5 transition"
+        >
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2.3" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/></svg>
+          <span>新建会话</span>
+        </button>
+
+        <input
+          id="sidebar-search"
+          type="search"
+          placeholder="搜索当前账号的项目、会话或消息全文..."
+          class="w-full rounded-xl border border-border/80 bg-bg px-3 py-1.5 text-xs text-slate-100 placeholder-slate-500 focus:border-blue-500 focus:outline-none"
+        />
+      </div>
+
+      <!-- Project-Grouped Sessions List -->
+      <div id="sidebar-sessions" class="flex-1 overflow-y-auto px-2 py-2.5 space-y-2">
+        <div class="text-slate-500 text-xs text-center py-8">正在加载工作区与会话...</div>
+      </div>
+
+      <!-- Sidebar Footer: Context Usage & Settings -->
+      <div class="safe-bottom px-3 pt-2 border-t border-border/80 flex items-center justify-between gap-2 text-[11px] shrink-0">
+        <span id="sidebar-usage" class="text-slate-400 truncate">上下文: -</span>
+        <button
+          id="btn-sidebar-settings"
+          type="button"
+          class="px-2.5 py-1.5 rounded-xl border border-border/80 bg-bg hover:bg-card active:scale-95 text-slate-300 hover:text-slate-100 inline-flex items-center gap-1.5 transition shrink-0"
+          title="打开设置"
+        >
+          <svg class="w-3.5 h-3.5 text-slate-400 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.324.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 011.37.49l1.296 2.247a1.125 1.125 0 01-.26 1.431l-1.003.827c-.293.24-.438.613-.431.992a6.759 6.759 0 010 .255c-.007.378.138.75.43.99l1.005.828c.424.35.534.954.26 1.43l-1.298 2.247a1.125 1.125 0 01-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.57 6.57 0 01-.22.128c-.331.183-.581.495-.644.869l-.213 1.28c-.09.543-.56.941-1.11.941h-2.594c-.55 0-1.02-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 01-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 01-1.369-.49l-1.297-2.247a1.125 1.125 0 01.26-1.431l1.004-.827c.292-.24.437-.613.43-.992a6.932 6.932 0 010-.255c.007-.378-.138-.75-.43-.99l-1.004-.828a1.125 1.125 0 01-.26-1.43l1.297-2.247a1.125 1.125 0 011.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.087.22-.128.332-.183.582-.495.644-.869l.214-1.281z"/>
+            <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+          </svg>
+          <span>设置</span>
+        </button>
+      </div>
+    </aside>
+
+    <!-- Main Chat Canvas -->
+    <div class="flex-1 min-w-0 flex flex-col bg-bg">
+      <!-- Clean Top Header -->
+      <header class="safe-top shrink-0 border-b border-border bg-surface/90 backdrop-blur-md px-3 pb-2.5 flex items-center justify-between gap-2 z-20">
+        <div class="flex items-center gap-2 min-w-0">
+          <button
+            id="btn-sidebar-open"
+            type="button"
+            class="lg:hidden p-1.5 -ml-1 rounded-lg border border-border/80 bg-card hover:bg-slate-800 active:scale-95 text-slate-200 shrink-0"
+            title="打开会话与工作区列表"
+          >
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5"/></svg>
+          </button>
+
+          <div class="min-w-0">
+            <div class="flex items-center gap-1.5 min-w-0">
+              <span id="session-title" class="text-sm font-semibold text-slate-100 truncate">VibeOne</span>
+              <span id="busy-badge" class="hidden text-[10px] px-1.5 py-0.5 rounded-full bg-blue-500/20 text-blue-300 border border-blue-500/30 shrink-0">运行中</span>
+              <button id="bg-tasks-badge" type="button" class="hidden text-[10px] px-1.5 py-0.5 rounded-full border shrink-0 inline-flex items-center gap-1 active:scale-95 transition" title="查看后台运行中的会话"></button>
+            </div>
+            <div class="flex items-center gap-1.5 min-w-0 mt-0.5">
+              <span
+                id="header-dir"
+                class="inline-flex items-center gap-1 text-[11px] text-emerald-300/90 truncate max-w-full"
+                title="当前工作目录"
+              >
+                <svg class="w-3 h-3 shrink-0 text-emerald-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M2.25 12.75V12A2.25 2.25 0 014.5 9.75h15A2.25 2.25 0 0121.75 12v.75m-8.69-6.44l-2.12-2.12a1.5 1.5 0 00-1.061-.44H4.5A2.25 2.25 0 002.25 6v12a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9a2.25 2.25 0 00-2.25-2.25h-5.379a1.5 1.5 0 01-1.06-.44z"/></svg>
+                <span id="header-dir-label" class="truncate font-mono">正在连接...</span>
+              </span>
+              <span id="header-error" class="hidden text-[11px] text-rose-400 truncate"></span>
+            </div>
+          </div>
+        </div>
+
+        <div class="flex items-center gap-1.5 shrink-0">
+          <button
+            id="btn-diff"
+            type="button"
+            class="px-2.5 py-1.5 rounded-lg border border-border bg-card hover:bg-slate-800 active:scale-95 text-xs font-medium text-slate-200 flex items-center gap-1"
+            title="查看当前目录 Git Diff"
+          >
+            <svg class="w-3.5 h-3.5 text-emerald-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"/></svg>
+            <span>Diff</span>
+          </button>
+
+          <button
+            id="btn-header-new"
+            type="button"
+            class="p-1.5 rounded-lg border border-border bg-card hover:bg-slate-800 active:scale-95 text-slate-200"
+            title="在当前项目新建会话"
+          >
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/></svg>
+          </button>
+        </div>
+      </header>
+
+      <!-- Chat Stream Area (wrapped so jump-to-bottom always sits cleanly above composer) -->
+      <div class="relative flex-1 min-h-0 flex flex-col">
+        <main id="chat-scroll" class="flex-1 overflow-y-auto px-3">
+          <div id="chat-list" class="max-w-3xl mx-auto space-y-3 py-4 pb-6">
+            <div id="empty-state" class="py-14 text-center space-y-3">
+              <img src="/icon-192.png?v=3" alt="" class="w-12 h-12 mx-auto rounded-2xl opacity-90" />
+              <div class="text-base font-semibold text-slate-100">Agy 远程控制已就绪</div>
+              <div class="text-xs text-slate-400 max-w-xs mx-auto leading-relaxed">
+                直接发送指令，或从左侧栏切换任意项目目录与历史会话。
+              </div>
+              <div class="pt-1 flex flex-col items-center gap-2.5">
+                <button
+                  id="btn-empty-sidebar"
+                  type="button"
+                  class="lg:hidden px-3.5 py-1.5 rounded-xl border border-border bg-card hover:bg-slate-800 active:scale-95 text-xs text-slate-200"
+                >
+                  打开项目与历史会话
+                </button>
+              </div>
+            </div>
+          </div>
+        </main>
+
+        <!-- Jump to bottom floating pill -->
+        <button
+          id="btn-scroll-bottom"
+          type="button"
+          class="hidden absolute right-4 bottom-3 z-20 px-3 py-1.5 rounded-full bg-surface/95 border border-border shadow-lg text-xs text-blue-300 hover:bg-card active:scale-95"
+        >
+          ↓ 回到最新
+        </button>
+      </div>
+
+      <!-- Permission Approval Bar -->
+      <section id="permission-bar" class="hidden shrink-0 border-t border-amber-500/40 bg-[#1a1610] px-3 py-2.5 z-20">
+        <div id="permission-list" class="max-w-3xl mx-auto space-y-2"></div>
+      </section>
+
+      <!-- Remote Control Composer (Flush right above iOS home indicator, matching official Agy Remote Control) -->
+      <footer class="composer-safe-bottom shrink-0 bg-bg/95 backdrop-blur-md px-3 pt-1.5 z-20">
+        <div class="relative max-w-3xl mx-auto">
+          <!-- Slash Command Palette (pops up above composer on `/` or toolbar tap) -->
+          <div id="slash-palette" class="hidden absolute left-0 right-0 bottom-full mb-2 z-30 rounded-2xl border border-border bg-[#111723] shadow-2xl overflow-hidden max-h-64 flex flex-col">
+            <div class="px-3 py-1.5 border-b border-border/70 flex items-center justify-between text-[11px] text-slate-400 shrink-0">
+              <span>快捷指令 (/)</span>
+              <span id="slash-count" class="text-slate-500"></span>
+            </div>
+            <div id="slash-list" class="overflow-y-auto p-1.5 space-y-0.5"></div>
+          </div>
+
+          <!-- Queued Follow-up Messages Bar (FIFO message queue per session) -->
+          <div id="queue-bar" class="hidden mb-1.5 rounded-2xl border border-blue-500/35 bg-[#111723] shadow-lg overflow-hidden">
+            <div class="px-3 py-1.5 border-b border-border/70 flex items-center justify-between gap-2 text-[11px]">
+              <div class="flex items-center gap-1.5 text-blue-300 font-medium min-w-0">
+                <span class="w-1.5 h-1.5 rounded-full bg-blue-400 animate-soft-pulse shrink-0"></span>
+                <span id="queue-count" class="truncate">待发送队列 (0)</span>
+              </div>
+              <div class="flex items-center gap-1.5 shrink-0">
+                <button id="btn-queue-run" type="button" class="hidden px-2 py-0.5 rounded-md bg-blue-600/80 hover:bg-blue-500 text-[10px] text-white font-medium active:scale-95 transition">继续执行</button>
+                <button id="btn-queue-clear" type="button" class="px-1.5 py-0.5 rounded-md text-[10px] text-slate-400 hover:text-rose-300 hover:bg-rose-950/50 transition">清空</button>
+              </div>
+            </div>
+            <div id="queue-list" class="max-h-36 overflow-y-auto divide-y divide-border/50"></div>
+          </div>
+
+          <div id="composer-card" class="rounded-2xl border border-border bg-surface focus-within:border-blue-500/70 transition shadow-lg">
+            <!-- Active Quote Reply Banner -->
+            <div id="quote-preview-bar" class="hidden px-2.5 pt-2">
+              <div class="flex items-start gap-2 rounded-xl border border-blue-500/25 bg-[#0d1422] px-2.5 py-2">
+                <span class="mt-0.5 w-[2.5px] self-stretch rounded-full bg-blue-400/90 shrink-0"></span>
+                <button id="quote-preview-jump" type="button" class="flex-1 min-w-0 text-left group focus:outline-none" title="定位到原消息">
+                  <div class="flex items-center gap-1 text-[11px] font-medium text-blue-300/95">
+                    <svg class="w-3 h-3 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 15L3 9m0 0l6-6M3 9h12a6 6 0 010 12h-3"/></svg>
+                    <span id="quote-preview-label">引用回复</span>
+                  </div>
+                  <div id="quote-preview-text" class="mt-0.5 text-xs text-slate-300/90 leading-snug line-clamp-2 break-words"></div>
+                </button>
+                <button id="btn-quote-clear" type="button" class="p-1 -mr-0.5 rounded-lg text-slate-400 hover:text-slate-100 hover:bg-card/80 active:scale-95 transition shrink-0" title="取消引用 (Esc)">
+                  <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+                </button>
+              </div>
+            </div>
+
+            <!-- Pending Image Previews -->
+            <div id="image-preview-row" class="hidden flex items-center gap-2 overflow-x-auto px-3 pt-2 pb-1"></div>
+
+            <!-- Text Input -->
+            <textarea
+              id="prompt-input"
+              rows="1"
+              placeholder="发指令、粘贴或拖入图片，输入 / 呼出命令..."
+              class="w-full resize-none bg-transparent px-3 pt-2.5 pb-1 text-[15px] leading-snug text-slate-100 placeholder-slate-500 focus:outline-none max-h-36 overflow-y-auto"
+            ></textarea>
+
+            <!-- Inline Controls Toolbar (Clean: Upload, Model/Level, Mode, Merged Send/Stop) -->
+            <div class="px-2 pb-1.5 pt-0.5 flex items-center justify-between gap-1.5">
+              <div class="flex items-center gap-1.5 min-w-0 flex-1 overflow-x-auto">
+                <input id="image-input" type="file" accept="image/*" multiple class="hidden" />
+                <button
+                  id="btn-upload"
+                  type="button"
+                  class="shrink-0 w-8 h-8 rounded-xl hover:bg-card active:scale-95 flex items-center justify-center text-slate-300 hover:text-white transition"
+                  title="上传图片 / 拍照"
+                >
+                  <svg class="w-[18px] h-[18px]" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909M3.75 19.5h16.5a1.5 1.5 0 001.5-1.5V6a1.5 1.5 0 00-1.5-1.5H3.75A1.5 1.5 0 002.25 6v12a1.5 1.5 0 001.5 1.5zm10.5-11.25h.008v.008h-.008V8.25zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0z"/>
+                  </svg>
+                </button>
+
+                <!-- 2-Level Model Picker Pill -->
+                <button
+                  id="btn-model"
+                  type="button"
+                  class="max-w-[205px] sm:max-w-[260px] h-8 px-2.5 rounded-xl border border-border/80 bg-bg hover:bg-card active:scale-[0.98] inline-flex items-center gap-1 text-xs text-slate-200 transition min-w-0 shrink"
+                  title="切换模型与思考档位"
+                >
+                  <svg class="w-3.5 h-3.5 shrink-0 text-blue-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z"/></svg>
+                  <span id="btn-model-label" class="truncate">模型</span>
+                  <svg class="w-3 h-3 shrink-0 text-slate-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5"/></svg>
+                </button>
+
+                <!-- Execution Mode Pill -->
+                <select
+                  id="mode-select"
+                  title="执行模式"
+                  class="h-8 max-w-[106px] rounded-xl border border-border/80 bg-bg hover:bg-card px-2 text-xs text-slate-300 focus:outline-none focus:border-blue-500 shrink-0"
+                ></select>
+              </div>
+
+              <!-- Merged Send / Stop Action Button -->
+              <div class="flex items-center shrink-0">
+                <button
+                  id="btn-send"
+                  type="button"
+                  data-action="send"
+                  class="w-8 h-8 rounded-xl bg-blue-600 hover:bg-blue-500 active:scale-95 flex items-center justify-center text-white disabled:opacity-40 transition"
+                  title="发送 (Shift+Enter)"
+                >
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M4.5 10.5L12 3m0 0l7.5 7.5M12 3v18"/>
+                  </svg>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </footer>
+    </div>
+  </div>
+
+  <!-- Directory Picker Modal (Clean, Single-Purpose) -->
+  <div id="dir-modal" class="hidden fixed top-0 left-0 right-0 full-viewport-layer z-50 bg-black/75 backdrop-blur-sm flex flex-col justify-end sm:justify-center sm:items-center">
+    <div class="w-full sm:max-w-xl h-[85dvh] sm:h-[78dvh] bg-surface border-t sm:border border-border rounded-t-2xl sm:rounded-2xl flex flex-col overflow-hidden shadow-2xl">
+      <div class="px-4 py-3 border-b border-border flex items-center justify-between gap-2 shrink-0">
+        <div class="min-w-0">
+          <div class="text-sm font-semibold text-white">选择工作目录新建会话</div>
+          <div class="text-[11px] text-slate-400">浏览本机目录，选择目标项目并开启会话</div>
+        </div>
+        <button id="btn-dir-close" type="button" class="px-2.5 py-1 rounded-lg bg-slate-800 text-xs text-slate-200 hover:bg-slate-700 shrink-0">关闭</button>
+      </div>
+
+      <!-- Shortcuts -->
+      <div id="dir-shortcuts" class="px-3 pt-2.5 pb-1.5 flex items-center gap-1.5 overflow-x-auto shrink-0"></div>
+
+      <!-- Manual Path Bar -->
+      <form id="dir-path-form" class="px-3 py-1.5 flex items-center gap-1.5 shrink-0">
+        <input
+          id="dir-path-input"
+          type="text"
+          placeholder="/path/to/project"
+          class="flex-1 min-w-0 rounded-xl border border-border bg-bg px-3 py-1.5 text-xs font-mono text-slate-100 placeholder-slate-500 focus:border-blue-500 focus:outline-none"
+        />
+        <button type="submit" class="px-3 py-1.5 rounded-xl border border-border bg-card hover:bg-slate-800 text-xs text-slate-200 shrink-0">前往</button>
+      </form>
+
+      <!-- Browser Controls -->
+      <div class="px-3 py-1.5 border-b border-border/60 flex items-center justify-between gap-2 text-xs shrink-0">
+        <div class="flex items-center gap-1.5 min-w-0">
+          <button id="btn-dir-up" type="button" class="px-2 py-1 rounded-lg border border-border bg-bg hover:bg-card text-slate-200 disabled:opacity-40 shrink-0">
+            ↑ 上级
+          </button>
+          <span id="dir-current-badge" class="text-[11px] text-slate-400 truncate"></span>
+        </div>
+        <div class="flex items-center gap-1.5 shrink-0">
+          <button id="btn-dir-hidden" type="button" class="px-2 py-1 rounded-lg border border-border bg-bg hover:bg-card text-[11px] text-slate-400">
+            隐藏目录
+          </button>
+          <button id="btn-dir-mkdir" type="button" class="px-2 py-1 rounded-lg border border-border bg-bg hover:bg-card text-[11px] text-blue-300">
+            ＋ 新建目录
+          </button>
+        </div>
+      </div>
+
+      <!-- Subdirectories List -->
+      <div id="dir-list" class="flex-1 overflow-y-auto p-3 space-y-1.5"></div>
+
+      <!-- Sticky CTA Footer -->
+      <div class="safe-bottom px-3 pt-2.5 border-t border-border bg-surface shrink-0 space-y-1.5">
+        <div id="dir-cta-path" class="text-[11px] font-mono text-slate-400 truncate px-0.5"></div>
+        <button
+          id="btn-dir-create-session"
+          type="button"
+          class="w-full py-2.5 px-4 rounded-xl bg-blue-600 hover:bg-blue-500 active:scale-[0.99] text-sm font-medium text-white transition flex items-center justify-center gap-1.5"
+        >
+          <span>＋ 在当前目录创建新会话</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 2-Level Model Picker Modal (Model -> Level) -->
+  <div id="model-modal" class="hidden fixed top-0 left-0 right-0 full-viewport-layer z-50 bg-black/75 backdrop-blur-sm flex flex-col justify-end sm:justify-center sm:items-center">
+    <div class="w-full sm:max-w-md max-h-[82dvh] bg-surface border-t sm:border border-border rounded-t-2xl sm:rounded-2xl flex flex-col overflow-hidden shadow-2xl">
+      <div class="px-4 py-3 border-b border-border flex items-center justify-between gap-2 shrink-0">
+        <div class="flex items-center gap-2 min-w-0">
+          <button
+            id="btn-model-back"
+            type="button"
+            class="hidden p-1 -ml-1 rounded-lg hover:bg-card text-slate-300 hover:text-white active:scale-95 shrink-0"
+            title="返回模型列表"
+          >
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5"/></svg>
+          </button>
+          <span id="model-modal-title" class="text-sm font-semibold text-white truncate">选择模型</span>
+          <span id="model-count" class="text-[11px] px-2 py-0.5 rounded-full bg-card border border-border text-slate-300 shrink-0">0</span>
+        </div>
+        <button id="btn-model-close" type="button" class="px-2.5 py-1 rounded-lg bg-slate-800 text-xs text-slate-200 hover:bg-slate-700 shrink-0">关闭</button>
+      </div>
+      <div id="model-search-wrap" class="px-3 pt-2.5 pb-2 border-b border-border/60 shrink-0">
+        <input
+          id="model-search"
+          type="search"
+          placeholder="搜索模型名称或 ID..."
+          class="w-full rounded-xl border border-border bg-bg px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:border-blue-500 focus:outline-none"
+        />
+      </div>
+      <div id="model-list" class="flex-1 overflow-y-auto p-3 space-y-1.5 safe-bottom"></div>
+    </div>
+  </div>
+
+  <!-- Git Diff Modal -->
+  <div id="diff-modal" class="hidden fixed top-0 left-0 right-0 full-viewport-layer z-50 bg-black/75 backdrop-blur-sm flex flex-col justify-end sm:justify-center sm:items-center">
+    <div class="w-full sm:max-w-3xl h-[88dvh] sm:h-[82dvh] bg-surface border-t sm:border border-border rounded-t-2xl sm:rounded-2xl flex flex-col overflow-hidden shadow-2xl">
+      <div class="px-4 py-3 border-b border-border flex items-center justify-between gap-2 shrink-0">
+        <div class="min-w-0">
+          <div class="text-sm font-semibold text-white flex items-center gap-2">
+            <span>Git Diff</span>
+            <span id="diff-branch" class="text-[11px] px-2 py-0.5 rounded-full bg-card border border-border text-blue-300 font-normal"></span>
+          </div>
+          <div id="diff-workdir" class="text-[11px] text-slate-400 truncate"></div>
+        </div>
+        <div class="flex items-center gap-2 shrink-0">
+          <button id="btn-diff-refresh" type="button" class="px-2.5 py-1 rounded-lg border border-border bg-card text-xs text-slate-200 hover:bg-slate-800">刷新</button>
+          <button id="btn-diff-close" type="button" class="px-2.5 py-1 rounded-lg bg-slate-800 text-xs text-slate-200 hover:bg-slate-700">关闭</button>
+        </div>
+      </div>
+      <div id="diff-content" class="flex-1 overflow-auto p-3 font-mono text-xs leading-relaxed selectable-text"></div>
+    </div>
+  </div>
+
+  <!-- File Preview Modal -->
+  <div id="file-preview-modal" class="hidden fixed top-0 left-0 right-0 full-viewport-layer z-50 bg-black/75 backdrop-blur-sm flex flex-col justify-end sm:justify-center sm:items-center">
+    <div class="w-full sm:max-w-4xl h-[88dvh] sm:h-[84dvh] bg-surface border-t sm:border border-border rounded-t-2xl sm:rounded-2xl flex flex-col overflow-hidden shadow-2xl">
+      <div class="px-4 py-3 border-b border-border flex items-center justify-between gap-2 shrink-0">
+        <div class="min-w-0 flex-1">
+          <div class="flex items-center gap-1.5 min-w-0">
+            <svg class="w-4 h-4 text-blue-400 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z"/></svg>
+            <span id="file-preview-name" class="text-sm font-semibold text-white truncate">文件预览</span>
+            <span id="file-preview-lang" class="hidden text-[10px] px-1.5 py-0.5 rounded-full bg-card border border-border text-blue-300 font-mono uppercase shrink-0"></span>
+            <span id="file-preview-range" class="hidden text-[10px] px-1.5 py-0.5 rounded-full bg-blue-500/20 border border-blue-400/35 text-blue-200 font-mono shrink-0"></span>
+          </div>
+          <div class="flex items-center gap-2 mt-0.5 min-w-0">
+            <button id="file-preview-path" type="button" class="text-[11px] font-mono text-slate-400 hover:text-slate-200 truncate text-left" title="点击复制完整路径"></button>
+            <span id="file-preview-meta" class="text-[10px] text-slate-500 shrink-0"></span>
+          </div>
+        </div>
+        <div class="flex items-center gap-1.5 shrink-0">
+          <button id="btn-file-preview-md-toggle" type="button" class="hidden px-2 py-1 rounded-lg border border-border bg-card text-xs text-blue-300 hover:bg-slate-800 active:scale-95 transition">源码</button>
+          <button id="btn-file-preview-wrap" type="button" class="hidden sm:inline-flex px-2 py-1 rounded-lg border border-border bg-card text-xs text-slate-300 hover:bg-slate-800 active:scale-95 transition" title="切换自动换行">换行</button>
+          <button id="btn-file-preview-copy" type="button" class="px-2 py-1 rounded-lg border border-border bg-card text-xs text-slate-200 hover:bg-slate-800 active:scale-95 transition">复制</button>
+          <button id="btn-file-preview-refresh" type="button" class="px-2 py-1 rounded-lg border border-border bg-card text-xs text-slate-200 hover:bg-slate-800 active:scale-95 transition">刷新</button>
+          <button id="btn-file-preview-close" type="button" class="px-2.5 py-1 rounded-lg bg-slate-800 text-xs text-slate-200 hover:bg-slate-700 active:scale-95 transition">关闭</button>
+        </div>
+      </div>
+      <div id="file-preview-banner" class="hidden px-4 py-1.5 border-b border-amber-500/30 bg-amber-950/35 text-[11px] text-amber-200 shrink-0"></div>
+      <div id="file-preview-content" class="flex-1 overflow-auto bg-[#0b1120] selectable-text safe-bottom"></div>
+    </div>
+  </div>
+
+  <!-- Settings Modal (Main Settings + Archived Sessions Sub-view) -->
+  <div id="settings-modal" class="hidden fixed top-0 left-0 right-0 full-viewport-layer z-50 bg-black/75 backdrop-blur-sm flex flex-col justify-end sm:justify-center sm:items-center">
+    <div class="w-full sm:max-w-md max-h-[82dvh] bg-surface border-t sm:border border-border rounded-t-2xl sm:rounded-2xl flex flex-col overflow-hidden shadow-2xl">
+      <div class="px-4 py-3 border-b border-border flex items-center justify-between gap-2 shrink-0">
+        <div class="flex items-center gap-2 min-w-0">
+          <button
+            id="btn-settings-back"
+            type="button"
+            class="hidden p-1 -ml-1 rounded-lg hover:bg-card text-slate-300 hover:text-white active:scale-95 shrink-0"
+            title="返回设置"
+          >
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5"/></svg>
+          </button>
+          <div class="min-w-0">
+            <div id="settings-modal-title" class="text-sm font-semibold text-white truncate">设置</div>
+            <div id="settings-modal-subtitle" class="text-[11px] text-slate-400 truncate">会话管理、推送通知与账号安全</div>
+          </div>
+        </div>
+        <button id="btn-settings-close" type="button" class="px-2.5 py-1 rounded-lg bg-slate-800 text-xs text-slate-200 hover:bg-slate-700 shrink-0">关闭</button>
+      </div>
+
+      <!-- Settings Main View -->
+      <div id="settings-main-view" class="flex-1 overflow-y-auto p-4 space-y-4 safe-bottom text-xs">
+        <!-- Session Management / Archived -->
+        <div class="space-y-2">
+          <div>
+            <div class="text-xs font-medium text-slate-200">会话管理</div>
+            <div class="text-[11px] text-slate-400 mt-0.5">查看或恢复已归档的历史会话</div>
+          </div>
+          <button
+            id="btn-settings-archived"
+            type="button"
+            class="w-full px-3 py-2 rounded-xl border border-border bg-bg hover:bg-card active:scale-[0.99] text-slate-200 flex items-center justify-between gap-2 transition"
+          >
+            <span class="flex items-center gap-2 min-w-0">
+              <svg class="w-3.5 h-3.5 text-amber-400 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M20.25 7.5l-.625 10.632a2.25 2.25 0 01-2.247 2.118H6.622a2.25 2.25 0 01-2.247-2.118L3.75 7.5M10 11.25h4M3.375 7.5h17.25c.621 0 1.125-.504 1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125H3.375c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125z"/></svg>
+              <span class="truncate">已归档会话</span>
+            </span>
+            <span class="flex items-center gap-1.5 shrink-0">
+              <span id="settings-archived-count" class="text-[11px] px-1.5 py-0.5 rounded-full bg-card border border-border text-slate-400">0</span>
+              <svg class="w-3.5 h-3.5 text-slate-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5"/></svg>
+            </span>
+          </button>
+        </div>
+
+        <!-- Push Notifications -->
+        <div class="pt-3 border-t border-border/60 space-y-2">
+          <div>
+            <div class="text-xs font-medium text-slate-200">推送通知</div>
+            <div class="text-[11px] text-slate-400 mt-0.5">任务完成或需要审批时发送系统通知</div>
+          </div>
+          <div class="flex items-center justify-between gap-2">
+            <button
+              id="btn-push-toggle"
+              type="button"
+              class="flex-1 min-w-0 px-3 py-2 rounded-xl border border-border bg-bg hover:bg-card active:scale-[0.99] text-slate-300 flex items-center justify-center gap-1.5 transition"
+            >
+              <svg class="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M14.857 17.082a23.848 23.848 0 005.454-1.31A8.967 8.967 0 0118 9.75v-.7V9A6 6 0 006 9v.75a8.967 8.967 0 01-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 01-5.714 0m5.714 0a3 3 0 11-5.714 0"/></svg>
+              <span id="push-toggle-label" class="truncate">开启推送通知</span>
+            </button>
+            <button
+              id="btn-push-test"
+              type="button"
+              class="hidden px-3 py-2 rounded-xl border border-border bg-bg hover:bg-card active:scale-95 text-slate-300 hover:text-white shrink-0 transition"
+              title="发送一条测试推送"
+            >
+              测试
+            </button>
+          </div>
+        </div>
+
+        <!-- Passkey -->
+        <div id="settings-passkey-section" class="hidden pt-3 border-t border-border/60 space-y-2">
+          <div>
+            <div class="text-xs font-medium text-slate-200">快捷解锁 (Passkey)</div>
+            <div class="text-[11px] text-slate-400 mt-0.5">绑定后可通过 iCloud 钥匙串 / Face ID 一键解锁</div>
+          </div>
+          <button
+            id="btn-passkey-bind"
+            type="button"
+            class="w-full px-3 py-2 rounded-xl border border-border bg-bg hover:bg-card active:scale-[0.99] text-slate-300 flex items-center justify-center gap-1.5 transition"
+            title="绑定 Passkey 后可通过 iCloud 钥匙串 / Face ID 一键解锁"
+          >
+            <svg class="w-3.5 h-3.5 shrink-0 text-emerald-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 5.25a3 3 0 013 3m3 0a6 6 0 01-7.029 5.912c-.563-.097-1.159.026-1.563.43L10.5 17.25H8.25v2.25H6v2.25H2.25v-2.818c0-.597.237-1.17.659-1.591l6.499-6.499c.404-.404.527-1 .43-1.563A6 6 0 1121.75 8.25z"/></svg>
+            <span id="passkey-bind-label" class="truncate">绑定 Passkey（面容/iCloud）</span>
+          </button>
+        </div>
+
+        <!-- Access Token -->
+        <div class="pt-3 border-t border-border/60 space-y-2">
+          <div>
+            <div class="text-xs font-medium text-slate-200">访问密钥</div>
+            <div class="text-[11px] text-slate-400 mt-0.5">用于在其他设备登录，默认隐藏，点击显示并复制</div>
+          </div>
+          <div class="flex items-center gap-1.5">
+            <button
+              id="btn-token-reveal-copy"
+              type="button"
+              class="flex-1 min-w-0 px-3 py-2 rounded-xl border border-border bg-bg hover:bg-card active:scale-[0.99] text-slate-200 flex items-center justify-between gap-2 transition"
+              title="点击显示并复制访问密钥"
+            >
+              <span class="flex items-center gap-2 min-w-0">
+                <svg class="w-3.5 h-3.5 shrink-0 text-blue-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z"/></svg>
+                <span id="settings-token-value" class="font-mono text-xs text-slate-300 truncate selectable-text">••••••••••••••••••••</span>
+              </span>
+              <span id="settings-token-action" class="text-[11px] text-blue-300 shrink-0">显示并复制</span>
+            </button>
+            <button
+              id="btn-token-hide"
+              type="button"
+              class="hidden px-2.5 py-2 rounded-xl border border-border bg-bg hover:bg-card active:scale-95 text-slate-400 hover:text-slate-200 shrink-0 transition"
+              title="重新隐藏密钥"
+            >
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3.98 8.223A10.477 10.477 0 001.934 12C3.226 16.338 7.244 19.5 12 19.5c.993 0 1.953-.138 2.863-.395M6.228 6.228A10.45 10.45 0 0112 4.5c4.756 0 8.773 3.162 10.065 7.498a10.523 10.523 0 01-4.293 5.774M6.228 6.228L3 3m3.228 3.228l3.65 3.65m7.894 7.894L21 21m-3.228-3.228l-3.65-3.65m0 0a3 3 0 10-4.243-4.243m4.242 4.242L9.88 9.88"/></svg>
+            </button>
+          </div>
+        </div>
+
+        <!-- Account / Logout -->
+        <div class="pt-3 border-t border-border/60 space-y-2">
+          <div class="text-xs font-medium text-slate-200">账号</div>
+          <button
+            id="btn-logout"
+            type="button"
+            class="w-full px-3 py-2 rounded-xl border border-rose-500/30 bg-rose-950/30 hover:bg-rose-950/60 active:scale-[0.99] text-rose-300 hover:text-rose-200 flex items-center justify-center gap-1.5 transition"
+          >
+            <svg class="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15m3 0l3-3m0 0l-3-3m3 3H9"/></svg>
+            <span>退出登录</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Archived Sessions Sub-view -->
+      <div id="settings-archived-view" class="hidden flex-1 min-h-0 flex flex-col">
+        <div class="px-3 pt-2.5 pb-2 border-b border-border/60 shrink-0">
+          <input
+            id="archived-search"
+            type="search"
+            placeholder="搜索当前账号的已归档会话或消息全文..."
+            class="w-full rounded-xl border border-border bg-bg px-3 py-1.5 text-xs text-slate-100 placeholder-slate-500 focus:border-blue-500 focus:outline-none"
+          />
+        </div>
+        <div id="settings-archived-list" class="flex-1 overflow-y-auto p-3 space-y-2.5 safe-bottom"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Image Lightbox Modal (In-App Preview for iOS PWA with Pinch & Double-Tap Zoom) -->
+  <div id="image-modal" class="hidden fixed top-0 left-0 right-0 full-viewport-layer z-50 bg-black/92 backdrop-blur-md flex flex-col select-none">
+    <div class="safe-top px-4 pb-3 flex items-center justify-between gap-2 shrink-0 z-10">
+      <div class="flex items-center gap-2">
+        <span id="image-modal-counter" class="text-xs font-medium text-slate-300 px-2.5 py-1 rounded-full bg-white/10">1 / 1</span>
+        <button
+          id="btn-image-zoom-reset"
+          type="button"
+          class="hidden text-xs font-medium text-blue-300 px-2.5 py-1 rounded-full bg-blue-500/20 border border-blue-400/35 active:scale-95 transition"
+          title="点击还原 1x"
+        >
+          1.0x
+        </button>
+      </div>
+      <button
+        id="btn-image-close"
+        type="button"
+        class="px-3.5 py-1.5 rounded-full bg-white/15 hover:bg-white/25 active:scale-95 text-xs font-medium text-white flex items-center gap-1 transition"
+      >
+        <span>×</span><span>关闭</span>
+      </button>
+    </div>
+    <div id="image-modal-stage" class="relative flex-1 min-h-0 flex items-center justify-center p-3 overflow-hidden" style="touch-action: none;">
+      <button
+        id="btn-image-prev"
+        type="button"
+        class="hidden absolute left-3 z-10 w-10 h-10 rounded-full bg-black/55 border border-white/15 text-white hover:bg-black/80 active:scale-95 flex items-center justify-center"
+        title="上一张"
+      >
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5"/></svg>
+      </button>
+      <img
+        id="image-modal-img"
+        src=""
+        alt="预览图片"
+        draggable="false"
+        class="max-w-full max-h-full object-contain rounded-lg shadow-2xl will-change-transform"
+      />
+      <button
+        id="btn-image-next"
+        type="button"
+        class="hidden absolute right-3 z-10 w-10 h-10 rounded-full bg-black/55 border border-white/15 text-white hover:bg-black/80 active:scale-95 flex items-center justify-center"
+        title="下一张"
+      >
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5"/></svg>
+      </button>
+    </div>
+    <div class="safe-bottom px-4 pt-2 text-center text-[11px] text-slate-400 shrink-0">
+      双指缩放 / 双击放大 · 下滑或点空白关闭
+    </div>
+  </div>
+
+  <!-- Profile Login Modal (Codex Device Auth / AGY OAuth PKCE) -->
+  <div id="profile-login-modal" class="hidden fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+    <div class="w-full max-w-md rounded-2xl border border-border bg-surface shadow-2xl overflow-hidden flex flex-col max-h-[88dvh]">
+      <div class="px-4 py-3 border-b border-border/80 flex items-center justify-between gap-2">
+        <div class="min-w-0">
+          <div id="profile-login-title" class="text-sm font-semibold text-slate-100 truncate">账号登录</div>
+          <div id="profile-login-subtitle" class="text-[11px] text-slate-400 truncate">免重启直接完成账号授权与热重载</div>
+        </div>
+        <button id="btn-profile-login-close" type="button" class="p-1.5 rounded-lg hover:bg-card text-slate-400 hover:text-slate-100 shrink-0" title="关闭">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+        </button>
+      </div>
+
+      <div class="p-4 space-y-3 overflow-y-auto text-xs">
+        <!-- Step 0: New profile name input (shown for "+ 新增 AGY" or "+ 新增 Codex") -->
+        <div id="profile-login-create-box" class="hidden space-y-2">
+          <label id="profile-login-create-label" class="block text-[11px] text-slate-300 font-medium">新账号配置名（例如 agy3、work）</label>
+          <div class="flex items-center gap-2">
+            <input
+              id="profile-login-new-name"
+              type="text"
+              placeholder="仅支持字母、数字、_ 和 -"
+              class="flex-1 rounded-xl border border-border bg-bg px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:border-blue-500 focus:outline-none"
+            />
+            <button
+              id="btn-profile-login-create-start"
+              type="button"
+              class="px-3 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-medium shrink-0 active:scale-95 transition"
+            >开始登录</button>
+          </div>
+          <p id="profile-login-create-hint" class="text-[11px] text-slate-500">将在 <code class="text-slate-300">~/.config/agy/profiles/&lt;名称&gt;</code> 创建独立目录并启动 Google OAuth 登录。</p>
+        </div>
+
+        <!-- Status banner -->
+        <div id="profile-login-status-box" class="hidden rounded-xl border border-border/80 bg-bg/90 px-3 py-2.5 flex items-start gap-2">
+          <span id="profile-login-spinner" class="inline-block w-3.5 h-3.5 mt-0.5 rounded-full border-2 border-blue-400/30 border-t-blue-400 animate-spin shrink-0"></span>
+          <div id="profile-login-status-text" class="text-slate-200 leading-relaxed break-words">正在启动登录流程...</div>
+        </div>
+
+        <!-- Auth URL block -->
+        <div id="profile-login-url-box" class="hidden rounded-xl border border-border/80 bg-bg/80 p-3 space-y-2">
+          <div class="text-[11px] text-slate-400 font-medium">第 1 步：在浏览器中打开授权页面</div>
+          <div class="flex items-center gap-2">
+            <a
+              id="profile-login-url-link"
+              href="#"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="flex-1 py-2 px-3 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-center font-medium active:scale-[0.99] transition"
+            >打开授权页面</a>
+            <button
+              id="btn-profile-login-copy-url"
+              type="button"
+              class="px-3 py-2 rounded-xl border border-border bg-card hover:bg-slate-700/60 text-slate-200 shrink-0 active:scale-95 transition"
+            >复制链接</button>
+          </div>
+        </div>
+
+        <!-- Codex Device Code block -->
+        <div id="profile-login-device-box" class="hidden rounded-xl border border-emerald-500/35 bg-emerald-500/10 p-3 space-y-2">
+          <div class="text-[11px] text-emerald-300 font-medium">第 2 步：在授权页面输入一次性设备码</div>
+          <div class="flex items-center justify-between gap-2 rounded-xl bg-bg/90 border border-emerald-500/30 px-3 py-2">
+            <code id="profile-login-device-code" class="text-base font-bold tracking-widest text-emerald-200 select-all">----</code>
+            <button
+              id="btn-profile-login-copy-code"
+              type="button"
+              class="px-2.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-medium shrink-0 active:scale-95 transition"
+            >复制设备码</button>
+          </div>
+          <p class="text-[11px] text-slate-400">完成浏览器确认后，本窗口会自动检测登录完成并热重载 Codex。</p>
+        </div>
+
+        <!-- AGY OAuth Code Paste block -->
+        <div id="profile-login-code-box" class="hidden rounded-xl border border-blue-500/35 bg-blue-500/10 p-3 space-y-2">
+          <div class="text-[11px] text-blue-300 font-medium">第 2 步：粘贴授权码或跳转后的完整回调链接</div>
+          <textarea
+            id="profile-login-code-input"
+            rows="3"
+            placeholder="粘贴浏览器显示的授权码，或直接粘贴整个 https://antigravity.google/oauth-callback?... 链接"
+            class="w-full rounded-xl border border-border bg-bg px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:border-blue-500 focus:outline-none resize-none"
+          ></textarea>
+          <button
+            id="btn-profile-login-submit-code"
+            type="button"
+            class="w-full py-2 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-medium active:scale-[0.99] transition"
+          >提交授权码并完成登录</button>
+        </div>
+      </div>
+
+      <div class="px-4 py-3 border-t border-border/80 flex items-center justify-between gap-2 bg-bg/40">
+        <button
+          id="btn-profile-login-retry"
+          type="button"
+          class="hidden px-3 py-1.5 rounded-xl border border-border bg-card hover:bg-slate-700/60 text-xs text-slate-200 active:scale-95 transition"
+        >重新发起</button>
+        <div class="flex-1"></div>
+        <button
+          id="btn-profile-login-cancel"
+          type="button"
+          class="px-3.5 py-1.5 rounded-xl border border-border bg-bg hover:bg-card text-xs text-slate-300 active:scale-95 transition"
+        >取消</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast Container -->
+  <div id="toast" class="hidden fixed top-16 left-1/2 -translate-x-1/2 z-50 px-4 py-2 rounded-full bg-slate-900/95 border border-border text-xs text-slate-100 shadow-xl whitespace-nowrap max-w-[90vw] truncate"></div>
+
+  <script src="/static/app-bootstrap.js"></script>
+  <script src="/static/app-sidebar-gestures.js"></script>
+  <script src="/static/app-sidebar.js"></script>
+  <script src="/static/app-chat.js"></script>
+  <script src="/static/app-pickers.js"></script>
+  <script src="/static/app-websocket.js"></script>
+  <script src="/static/app-auth.js"></script>
+  <script src="/static/app-composer.js"></script>
+  <script src="/static/app-picker-events.js"></script>
+  <script src="/static/app-profiles.js"></script>
+  <script src="/static/app-settings.js"></script>
+  <script src="/static/app-image-viewer.js"></script>
+  <script src="/static/app-file-tools.js"></script>
+  <script src="/static/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs>
+    <radialGradient id="bgGlow" cx="50%" cy="46%" r="55%">
+      <stop offset="0%" stop-color="#172542" />
+      <stop offset="55%" stop-color="#0e1525" />
+      <stop offset="100%" stop-color="#0b0f17" />
+    </radialGradient>
+    <radialGradient id="auraCyan" cx="50%" cy="52%" r="42%">
+      <stop offset="0%" stop-color="#38bdf8" stop-opacity="0.22" />
+      <stop offset="60%" stop-color="#6366f1" stop-opacity="0.06" />
+      <stop offset="100%" stop-color="#0b0f17" stop-opacity="0" />
+    </radialGradient>
+    <linearGradient id="leftWing" x1="22%" y1="20%" x2="55%" y2="82%">
+      <stop offset="0%" stop-color="#818cf8" />
+      <stop offset="48%" stop-color="#3b82f6" />
+      <stop offset="100%" stop-color="#38bdf8" />
+    </linearGradient>
+    <linearGradient id="rightWing" x1="78%" y1="20%" x2="45%" y2="82%">
+      <stop offset="0%" stop-color="#34d399" />
+      <stop offset="52%" stop-color="#10b981" />
+      <stop offset="100%" stop-color="#22d3ee" />
+    </linearGradient>
+    <radialGradient id="sparkGlow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.95" />
+      <stop offset="45%" stop-color="#bae6fd" stop-opacity="0.45" />
+      <stop offset="100%" stop-color="#38bdf8" stop-opacity="0" />
+    </radialGradient>
+  </defs>
+  <rect width="1024" height="1024" fill="url(#bgGlow)" />
+  <circle cx="512" cy="520" r="420" fill="url(#auraCyan)" />
+  <line x1="268" y1="276" x2="512" y2="764" stroke="url(#leftWing)" stroke-width="118" stroke-linecap="round" />
+  <line x1="756" y1="276" x2="512" y2="764" stroke="url(#rightWing)" stroke-width="118" stroke-linecap="round" opacity="0.96" />
+  <circle cx="512" cy="764" r="59" fill="#e0f2fe" opacity="0.35" />
+  <circle cx="512" cy="342" r="105" fill="url(#sparkGlow)" />
+  <path d="M512 246 C520 314 540 334 608 342 C540 350 520 370 512 438 C504 370 484 350 416 342 C484 334 504 314 512 246 Z" fill="#f8fafc" />
+</svg>
