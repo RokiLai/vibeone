@@ -1,49 +1,22 @@
 # VibeOne
 
-Mobile-first 多 AI 编程远程控制台，通过 Web / iOS PWA 远程操控本机的 **Antigravity CLI (`agy`)** 与 **OpenAI Codex (`codex`)**，让你在手机或任意浏览器上随时查看进度、审批权限、切换账号和继续编程。
+**在手机上接手电脑上的 AI 编程任务。**
 
-## 核心特性
+VibeOne 是一个自托管的网页控制台，连接运行在你电脑上的 **Codex CLI** 和 **Antigravity CLI**。比如你出门前让 Codex 修一个 bug，路上可以用手机看它做到哪一步、打开 Git Diff 审阅改动、处理权限请求，再发一条消息让它继续。Agent 在你的电脑上运行，项目文件和 VibeOne 的会话记录保存在本机。
 
-- **双引擎支持 & 后台预热秒切**
-  - 同时支持 **Antigravity CLI**（`agy acp --stdio`，含多账号 profile 切换）与 **OpenAI Codex**（`codex app-server --stdio`）。
-  - 服务启动时后台预热已登录的账号，可通过 `VIBEONE_PREWARM_PROFILES` 限定范围。切换账号时可保留后台任务。
-- **模型与推理强度独立记忆**
-  - 按 Agent / 账号（如 `agy2`、`agy_r`、`codex`）分别持久化最近一次选择的模型与推理档位（如 `Gemini 4 Neon (Medium)`、`GPT-5.4 (xhigh)`），重启服务、重新打开前端或切换会话时自动恢复。
-- **多工作目录 & 多会话并发**
-  - 支持在多个项目目录间自由切换、浏览文件与新建目录，各会话独立运行互不阻塞。
-  - SQLite 本地持久化聊天记录、上传图片预览、Token 用量与待发送队列；从侧边栏移除目录或会话仅更新本地记录，绝不删除磁盘文件。
-- **移动端优先的交互体验**
-  - 实时 WebSocket 流式输出、Markdown 渲染与代码高亮、可折叠带行号的 Diff 视图、消息引用回复、图片上传、工具调用生命周期展示与权限审批弹窗。
-  - 支持 **iOS Standalone PWA**（添加到主屏幕全屏使用）与 **Web Push** 系统通知（任务完成、等待审批或异常中断时推送，前台自动免打扰）。
-- **余量查询与安全认证**
-  - 内置 Antigravity 多账号余量与 Codex 额度查询。
-  - Token 登录签发 HttpOnly 会话 Cookie，内置登录失败速率限制与静态资源白名单。
+## 演示
 
-## 目录结构
+用手机查看阅读清单项目的任务进度，展开搜索功能的 Git Diff，再发一条消息要求补充空结果提示。
 
-```text
-vibeone/
-├── server.py               # FastAPI 入口与 HTTP / WebSocket API
-├── start.sh                # 一键启动脚本（自动加载 .env 与 PATH）
-├── index.html              # 前端入口页面
-├── manifest.json           # PWA Manifest
-├── sw.js                   # Service Worker（Web Push 通知）
-├── Caddyfile.example       # Caddy HTTPS 反向代理配置示例
-├── requirements.txt        # Python 依赖
-├── vibeone/
-│   ├── config.py           # 环境变量、二进制路径与多账号配置解析
-│   ├── store.py            # SQLite 会话、消息与元数据持久化
-│   ├── push.py             # VAPID Web Push 推送管理
-│   ├── quota.py            # 账号余量查询
-│   └── engines/
-│       ├── acp.py          # Antigravity ACP 引擎封装
-│       ├── codex.py        # OpenAI Codex App-Server 引擎封装
-│       └── pool.py         # 多账号热切换连接池与后台预热
-├── static/                 # 前端逻辑与样式 (app.js, app.css)
-├── vendor/                 # 本地前端依赖 (marked, highlight.js, DOMPurify)
-├── icons/                  # PWA 图标资源
-└── tests/                  # 单元测试
-```
+<img src="docs/demo/mobile-workflow.gif" width="360" alt="VibeOne 移动端演示：查看运行中的任务、展开 Git Diff、发送后续指令">
+
+演示使用真实的 VibeOne 界面和模拟任务数据。[查看静态截图](docs/demo/mobile.png)。
+
+## 为什么用 VibeOne
+
+- **离开电脑也能接着做。** 手机浏览器可以查看流式输出、审阅 Diff、审批权限和发送后续指令。在 iOS 上添加到主屏幕后，还可以接收任务完成和待审批的 Web Push 通知。
+- **多个项目可以同时推进。** 在同一界面切换工作目录和会话，查看后台任务。会话记录保存在本地 SQLite，回来后可以继续之前的上下文。
+- **在同一个界面管理两种 CLI。** 支持 Codex 和 Antigravity 的多账号切换，可提前启动已登录的账号，并按账号记住模型和推理设置。
 
 ## 快速开始
 
@@ -139,6 +112,32 @@ iOS Web Push 需要 HTTPS。将 `VIBEONE_VAPID_SUBJECT` 设置为部署者的实
 
 - 修改前端文件（`index.html`、`static/app.js`、`static/app.css`）刷新浏览器即可生效，无需重启后端。
 - 修改后端 Python 代码后需重启服务生效；如果通过 macOS LaunchAgent 托管运行，可在项目根目录创建 `.restart_after_turn` 触发当前回合结束后的无损自动重启。
+
+### 目录结构
+
+```text
+vibeone/
+├── server.py               # FastAPI 入口与 HTTP / WebSocket API
+├── start.sh                # 一键启动脚本（自动加载 .env 与 PATH）
+├── index.html              # 前端入口页面
+├── manifest.json           # PWA Manifest
+├── sw.js                   # Service Worker（Web Push 通知）
+├── Caddyfile.example       # Caddy HTTPS 反向代理配置示例
+├── requirements.txt        # Python 依赖
+├── vibeone/
+│   ├── config.py           # 环境变量、二进制路径与多账号配置解析
+│   ├── store.py            # SQLite 会话、消息与元数据持久化
+│   ├── push.py             # VAPID Web Push 推送管理
+│   ├── quota.py            # 账号余量查询
+│   └── engines/
+│       ├── acp.py          # Antigravity ACP 引擎封装
+│       ├── codex.py        # OpenAI Codex App-Server 引擎封装
+│       └── pool.py         # 多账号热切换连接池与后台预热
+├── static/                 # 前端逻辑与样式 (app.js, app.css)
+├── vendor/                 # 本地前端依赖 (marked, highlight.js, DOMPurify)
+├── icons/                  # PWA 图标资源
+└── tests/                  # 单元测试
+```
 
 ## 许可证
 
