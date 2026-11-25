@@ -139,3 +139,7 @@ iOS Web Push 需要 HTTPS。将 `VIBEONE_VAPID_SUBJECT` 设置为部署者的实
 
 - 修改前端文件（`index.html`、`static/app.js`、`static/app.css`）刷新浏览器即可生效，无需重启后端。
 - 修改后端 Python 代码后需重启服务生效；如果通过 macOS LaunchAgent 托管运行，可在项目根目录创建 `.restart_after_turn` 触发当前回合结束后的无损自动重启。
+
+## 许可证
+
+VibeOne 采用 [MIT 许可证](LICENSE)。随项目分发的第三方依赖遵循[各自的许可证](vendor/README.md)。
