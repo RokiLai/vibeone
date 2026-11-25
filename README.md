@@ -21,6 +21,12 @@ VibeOne 是一个自托管的网页控制台，连接运行在你电脑上的 **
 - **多个项目可以同时推进。** 在同一界面切换工作目录和会话，查看后台任务。会话记录保存在本地 SQLite，回来后可以继续之前的上下文。
 - **在同一个界面管理两种 CLI。** 支持 Codex 和 Antigravity 的多账号切换，可提前启动已登录的账号，并按账号记住模型和推理设置。
 
+## 工作原理
+
+手机浏览器通过 WebSocket 连接你电脑上的 VibeOne。VibeOne 在本机启动官方 CLI，通过标准输入输出与它们通信，转发消息、任务进度和权限请求。Codex 使用 `codex app-server --stdio`，Antigravity 使用 `agy acp --stdio`。
+
+两种接入方式都有官方文档。CLI 使用你自己的登录身份调用模型，账号权限、额度和服务条款仍由对应平台决定。 [OpenAI Codex 集成指南](https://developers.openai.com/blog/codex-as-a-platform) · [Google Antigravity ACP 文档](https://antigravity.google/docs/cli/acp/)
+
 ## 安装前需要准备什么
 
 | 使用方式 | 需要准备 |
