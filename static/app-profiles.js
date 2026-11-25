@@ -32,7 +32,7 @@
             rightLabel = '当前';
             rightClass = 'text-emerald-300';
           } else if (logged) {
-            rightLabel = p.warm ? '⚡ 秒切' : '切换';
+            rightLabel = '切换';
             rightClass = p.warm ? 'text-emerald-300' : 'text-slate-400';
           }
           const disableRow = Boolean(state.switchingProfile || state.reloadingProfile);
@@ -162,7 +162,7 @@
         renderProfileHeader();
         sendWs({ type: 'switch_profile', profile: state.currentProfile });
         await loadProfiles();
-        showToast(data.hot ? `⚡ 已秒切到账号: ${state.currentProfile}` : `已切换账号: ${state.currentProfile}`);
+        showToast(`已切换账号: ${state.currentProfile}`);
       } catch (err) {
         state.switchingProfile = '';
         renderProfileList();

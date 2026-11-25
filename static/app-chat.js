@@ -1102,7 +1102,7 @@
           ${thumbHtml}
           <button type="button" class="btn-queue-edit flex-1 min-w-0 text-left text-xs text-slate-200 truncate hover:text-white" title="点击撤回到输入框编辑">${escapeHtml(textPreview)}</button>
           ${imgs.length > 1 ? `<span class="text-[10px] text-slate-400 shrink-0">+${imgs.length - 1}图</span>` : ''}
-          <button type="button" class="btn-queue-steer px-1.5 py-0.5 rounded-md bg-amber-500/15 hover:bg-amber-500/30 border border-amber-400/35 text-[10px] text-amber-200 font-medium active:scale-95 transition shrink-0" title="${state.isBusy ? '打断当前回合并立即插队发送' : '立即发送此消息'}">${state.isBusy ? '⚡ 插队' : '发送'}</button>
+          <button type="button" class="btn-queue-steer px-1.5 py-0.5 rounded-md bg-amber-500/15 hover:bg-amber-500/30 border border-amber-400/35 text-[10px] text-amber-200 font-medium active:scale-95 transition shrink-0" title="${state.isBusy ? '打断当前回合并立即插队发送' : '立即发送此消息'}">${state.isBusy ? '插队' : '发送'}</button>
           <button type="button" class="btn-queue-del p-1 rounded-md text-slate-400 hover:text-rose-300 hover:bg-rose-950/60 active:scale-95 transition shrink-0" title="从队列移除">
             <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
           </button>
