@@ -346,6 +346,19 @@
     let _sessionsLoadQueued = false;
     let _sessionsLoadQueuedRefresh = false;
     let _sessionsLoadTimer = null;
+    let _sessionsDirty = true;
+    let _sessionsLastLoadedAt = 0;
+    let _sessionsLastLoadedProfile = '';
+
+    function isSidebarSessionsVisible() {
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return false;
+      if (typeof isDesktopSidebarLayout === 'function' && isDesktopSidebarLayout()) return true;
+      if (typeof isSidebarOpen === 'function' && isSidebarOpen()) return true;
+      if (els.settingsModal && !els.settingsModal.classList.contains('hidden') && state.settingsView === 'archived') {
+        return true;
+      }
+      return false;
+    }
 
     async function _doLoadSidebarSessions({ forceRefresh = false } = {}) {
       const reqProfile = state.currentProfile || '';
@@ -362,6 +375,7 @@
       const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
       _sessionsLoadAbort = controller;
       _sessionsLoadProfile = reqProfile;
+      _sessionsDirty = false;
       const run = (async () => {
         try {
           const qs = new URLSearchParams();
@@ -378,6 +392,8 @@
           if (data.current_profile && state.currentProfile && data.current_profile !== state.currentProfile) {
             return;
           }
+          _sessionsLastLoadedAt = Date.now();
+          _sessionsLastLoadedProfile = reqProfile;
           state.sessionsCache = data.sessions || [];
           state.archivedSessionsCache = data.archived_sessions || [];
           renderSidebarSessions();
@@ -390,7 +406,11 @@
               const nextRefresh = _sessionsLoadQueuedRefresh;
               _sessionsLoadQueued = false;
               _sessionsLoadQueuedRefresh = false;
-              _doLoadSidebarSessions({ forceRefresh: nextRefresh });
+              if (nextRefresh || isSidebarSessionsVisible()) {
+                _doLoadSidebarSessions({ forceRefresh: nextRefresh });
+              } else {
+                _sessionsDirty = true;
+              }
             }
           }
         }
@@ -401,10 +421,28 @@
 
     function loadSidebarSessions(immediate = false, opts = {}) {
       const forceRefresh = Boolean(opts && opts.forceRefresh);
+      const onlyIfStale = Boolean(opts && opts.onlyIfStale);
+      const reqProfile = state.currentProfile || '';
+      const profileChanged = _sessionsLastLoadedProfile !== reqProfile;
+      if (forceRefresh || profileChanged || !onlyIfStale) {
+        _sessionsDirty = true;
+      }
       if (immediate) {
         clearTimeout(_sessionsLoadTimer);
         _sessionsLoadTimer = null;
         return _doLoadSidebarSessions({ forceRefresh });
+      }
+      if (!forceRefresh && !isSidebarSessionsVisible()) {
+        return;
+      }
+      if (
+        !forceRefresh &&
+        onlyIfStale &&
+        !_sessionsDirty &&
+        !profileChanged &&
+        Date.now() - _sessionsLastLoadedAt < 3000
+      ) {
+        return;
       }
       if (forceRefresh) {
         _sessionsLoadQueuedRefresh = true;
@@ -414,8 +452,12 @@
         _sessionsLoadTimer = null;
         const nextRefresh = _sessionsLoadQueuedRefresh;
         _sessionsLoadQueuedRefresh = false;
+        if (!nextRefresh && !isSidebarSessionsVisible()) {
+          _sessionsDirty = true;
+          return;
+        }
         _doLoadSidebarSessions({ forceRefresh: nextRefresh });
-      }, 120);
+      }, 300);
     }
 
     let _sessionSyncInFlight = false;

@@ -25,7 +25,7 @@
       clearSidebarInlineStyles();
       els.sidebar.classList.remove('-translate-x-full');
       els.sidebarBackdrop.classList.remove('hidden');
-      loadSidebarSessions();
+      loadSidebarSessions(false, { onlyIfStale: true });
     }
 
     function closeSidebar() {
@@ -56,7 +56,7 @@
           els.sidebarBackdrop.style.transition = '';
           els.sidebarBackdrop.style.opacity = '';
         }, 210);
-        loadSidebarSessions();
+        loadSidebarSessions(false, { onlyIfStale: true });
       } else {
         els.sidebar.classList.add('-translate-x-full');
         els.sidebarBackdrop.style.opacity = '0';
@@ -222,6 +222,7 @@
           _sidebarBackdropHideTimer = null;
           clearSidebarInlineStyles();
           els.sidebarBackdrop.classList.add('hidden');
+          loadSidebarSessions(false, { onlyIfStale: true });
         }
       };
       if (desktopSidebarMql.addEventListener) {

@@ -172,7 +172,6 @@
             probeWsHealth(WS_PONG_TIMEOUT);
           }
         }, WS_HEARTBEAT_INTERVAL);
-        loadSidebarSessions();
       };
 
       ws.onmessage = (ev) => {
@@ -380,7 +379,7 @@
         }
         ensureWsAlive(true);
         requestSnapshotSync(false);
-        if (!isAuthRequired()) loadSidebarSessions();
+        if (!isAuthRequired()) loadSidebarSessions(false, { onlyIfStale: true });
       }
     });
 
