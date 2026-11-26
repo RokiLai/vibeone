@@ -21,6 +21,7 @@ class ProfileManagerPool:
         self.clients: Set[WebSocket] = set()
         self._client_visible: Dict[WebSocket, bool] = {}
         self._client_views: Dict[WebSocket, Dict[str, Optional[str]]] = {}
+        self._client_senders: Dict[WebSocket, Any] = {}
         self._profile_locks: Dict[str, asyncio.Lock] = {}
         self._managers: Dict[str, AgyACPManager] = {}
         self._prewarm_tasks: Dict[str, asyncio.Task] = {}
@@ -39,7 +40,7 @@ class ProfileManagerPool:
 
     def _create_manager(self, profile: str) -> AgyACPManager:
         cls = CodexAppServerManager if config.is_codex_profile(profile) else AgyACPManager
-        return cls(
+        mgr = cls(
             self.default_workdir,
             self.store,
             push=self.push,
@@ -49,6 +50,8 @@ class ProfileManagerPool:
             client_views=self._client_views,
             is_active_fn=lambda p=profile: self.current_profile == p,
         )
+        mgr._client_senders = self._client_senders
+        return mgr
 
     def _get_or_create(self, profile: str) -> AgyACPManager:
         mgr = self._managers.get(profile)
@@ -81,6 +84,12 @@ class ProfileManagerPool:
         self.clients.discard(ws)
         self._client_visible.pop(ws, None)
         self._client_views.pop(ws, None)
+        sender = self._client_senders.pop(ws, None)
+        if sender is not None:
+            sender.stop()
+
+    async def send_ws_text(self, ws: WebSocket, payload: str) -> bool:
+        return await self.active.send_ws_text(ws, payload)
 
     @property
     def active(self) -> AgyACPManager:
@@ -211,6 +220,10 @@ class ProfileManagerPool:
         return scheduled
 
     async def stop(self) -> None:
+        for ws in list(self._client_senders.keys()):
+            sender = self._client_senders.pop(ws, None)
+            if sender is not None:
+                sender.stop()
         tasks = [t for t in self._prewarm_tasks.values() if not t.done()]
         self._prewarm_tasks.clear()
         for t in tasks:

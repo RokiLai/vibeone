@@ -1,6 +1,6 @@
 // VibeOne Service Worker — Offline App Shell Cache & Web Push Notifications (iOS 16.4+ PWA / Android / Desktop)
 
-const CACHE_NAME = 'vibeone-shell-v1';
+const CACHE_NAME = 'vibeone-shell-v2';
 const PRECACHE_URLS = [
   '/',
   '/manifest.json?v=3',
@@ -13,19 +13,30 @@ const PRECACHE_URLS = [
   '/vendor/marked.min.js',
   '/vendor/highlight.min.js',
   '/static/app.css',
+  '/static/app-i18n-dict.js',
   '/static/app-i18n.js',
   '/static/app-bootstrap.js',
   '/static/app-sidebar-gestures.js',
+  '/static/app-sidebar-search.js',
+  '/static/app-sidebar-actions.js',
   '/static/app-sidebar.js',
+  '/static/app-chat-markdown.js',
+  '/static/app-chat-helpers.js',
+  '/static/app-chat-render.js',
   '/static/app-chat.js',
   '/static/app-pickers.js',
   '/static/app-websocket.js',
   '/static/app-auth.js',
+  '/static/app-composer-cards.js',
+  '/static/app-composer-slash.js',
   '/static/app-composer.js',
   '/static/app-picker-events.js',
   '/static/app-profiles.js',
+  '/static/app-profile-login.js',
   '/static/app-settings.js',
   '/static/app-image-viewer.js',
+  '/static/app-git-diff-format.js',
+  '/static/app-git-diff.js',
   '/static/app-file-tools.js',
   '/static/app.js',
 ];

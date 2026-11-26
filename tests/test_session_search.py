@@ -185,7 +185,7 @@ class SessionFullTextSearchTest(unittest.IsolatedAsyncioTestCase):
             # Invalid profile MUST return 400 rather than falling back to another account
             with self.assertRaises(HTTPException) as ctx:
                 await server.search_sessions_api(
-                    q="webpush",
+                    q="nonexistent_profile_xyz",
                     profile="nonexistent_profile_xyz",
                     session_id=None,
                     scope="active",
@@ -197,6 +197,36 @@ class SessionFullTextSearchTest(unittest.IsolatedAsyncioTestCase):
             server.manager._managers.clear()
             server.manager._managers.update(orig_managers)
             server.manager.current_profile = orig_current
+
+    async def test_fts5_short_terms_special_chars_and_mutation_sync(self) -> None:
+        self.assertTrue(self.store._fts5_enabled)
+
+        # Short (<3 char) Chinese & English terms still match accurately
+        short_zh = self.store.search_sessions("agy2", "推送")
+        self.assertEqual([h["session_id"] for h in short_zh], ["s_a_main"])
+
+        # Special FTS5 syntax characters should be treated literally without raising errors
+        self.store.upsert_item(
+            "s_a_main",
+            {"id": "i_spec", "type": "assistant", "text": 'Check "foo-bar:baz*" AND OR NOT', "ts": 505.0},
+        )
+        spec_hits = self.store.search_sessions("agy2", '"foo-bar:baz*"')
+        self.assertEqual([h["session_id"] for h in spec_hits], ["s_a_main"])
+
+        # Updating an item replaces old FTS5 content
+        self.store.upsert_item(
+            "s_a_main",
+            {"id": "i_spec", "type": "assistant", "text": "replaced_unique_marker_xyz", "ts": 506.0},
+        )
+        self.assertEqual(self.store.search_sessions("agy2", "foo-bar:baz*"), [])
+        self.assertEqual(
+            [h["session_id"] for h in self.store.search_sessions("agy2", "replaced_unique_marker_xyz")],
+            ["s_a_main"],
+        )
+
+        # Deleting a session removes its FTS5 entries
+        self.store.delete_session("s_a_tool")
+        self.assertEqual(self.store.search_sessions("agy2", "AssertionError"), [])
 
 
 if __name__ == "__main__":
