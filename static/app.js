@@ -2,7 +2,9 @@
     const appEl = $('app');
     function syncAppViewportHeight() {
       const vv = window.visualViewport;
-      if (vv && vv.height < window.innerHeight - 100) {
+      const keyboardOpen = Boolean(vv && vv.height < window.innerHeight - 100);
+      document.documentElement.classList.toggle('keyboard-open', keyboardOpen);
+      if (keyboardOpen) {
         const kh = `${Math.round(vv.height)}px`;
         document.documentElement.style.setProperty('--app-height', kh);
         appEl.style.bottom = 'auto';

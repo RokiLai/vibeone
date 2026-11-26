@@ -29,6 +29,9 @@
     }
 
     function closeSidebar() {
+      if (els.sidebarSearch && document.activeElement === els.sidebarSearch) {
+        els.sidebarSearch.blur();
+      }
       clearTimeout(_sidebarBackdropHideTimer);
       _sidebarBackdropHideTimer = null;
       clearSidebarInlineStyles();

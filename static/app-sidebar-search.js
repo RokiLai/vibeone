@@ -370,3 +370,45 @@
       });
     }
 
+    // Mobile sidebar search keyboard ergonomics: collapse non-essential chrome
+    // while typing so the session list gets maximum height, and dismiss keyboard on scroll.
+    if (els.sidebarSearch && els.sidebar) {
+      els.sidebarSearch.addEventListener('focus', () => {
+        els.sidebar.classList.add('sidebar-search-focused');
+      });
+      els.sidebarSearch.addEventListener('blur', () => {
+        els.sidebar.classList.remove('sidebar-search-focused');
+      });
+      els.sidebarSearch.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && !e.isComposing) {
+          els.sidebarSearch.blur();
+        }
+      });
+    }
+
+    if (els.sidebarSessions && els.sidebarSearch) {
+      let _searchScrollTouchY = null;
+      els.sidebarSessions.addEventListener('touchstart', (e) => {
+        if (document.activeElement === els.sidebarSearch && e.touches.length === 1) {
+          _searchScrollTouchY = e.touches[0].clientY;
+        } else {
+          _searchScrollTouchY = null;
+        }
+      }, { passive: true });
+      els.sidebarSessions.addEventListener('touchmove', (e) => {
+        if (_searchScrollTouchY === null || e.touches.length !== 1) return;
+        if (Math.abs(e.touches[0].clientY - _searchScrollTouchY) > 8) {
+          _searchScrollTouchY = null;
+          if (document.activeElement === els.sidebarSearch) {
+            els.sidebarSearch.blur();
+          }
+        }
+      }, { passive: true });
+      els.sidebarSessions.addEventListener('touchend', () => {
+        _searchScrollTouchY = null;
+      }, { passive: true });
+      els.sidebarSessions.addEventListener('touchcancel', () => {
+        _searchScrollTouchY = null;
+      }, { passive: true });
+    }
+

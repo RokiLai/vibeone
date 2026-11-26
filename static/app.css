@@ -49,6 +49,25 @@
       padding-bottom: max(0.55rem, calc(env(safe-area-inset-bottom) * 0.85));
     }
 
+    /* Mobile sidebar keyboard & search focus optimization */
+    @media (max-width: 1023px) {
+      html.keyboard-open #sidebar-footer,
+      #sidebar.sidebar-search-focused #sidebar-footer {
+        display: none;
+      }
+      #sidebar.sidebar-search-focused #sidebar-profile-section,
+      #sidebar.sidebar-search-focused #btn-sidebar-new {
+        display: none;
+      }
+      #sidebar.sidebar-search-focused #sidebar-actions-section {
+        padding-top: 0.5rem;
+        padding-bottom: 0.5rem;
+      }
+      #sidebar.sidebar-search-focused #sidebar-search {
+        margin-top: 0;
+      }
+    }
+
     /* Native precise text selection inside messages */
     .selectable-text {
       -webkit-user-select: text;
