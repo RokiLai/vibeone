@@ -66,6 +66,8 @@ class ACPLifecycleMixin:
             limit=16 * 1024 * 1024,  # 16MB line buffer for large diffs/outputs
         )
         self.proc = proc
+        if hasattr(self, "_recent_stderr"):
+            self._recent_stderr.clear()
         self._stdout_task = asyncio.create_task(self._read_stdout_loop(proc))
         self._stderr_task = asyncio.create_task(self._read_stderr_loop(proc))
 

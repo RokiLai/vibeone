@@ -52,6 +52,7 @@ class BaseEngineManager(ClientTransportMixin, EngineStateHelpersMixin):
         self.proc: Optional[asyncio.subprocess.Process] = None
         self._stdout_task: Optional[asyncio.Task] = None
         self._stderr_task: Optional[asyncio.Task] = None
+        self._recent_stderr: List[str] = []
         self._write_lock = asyncio.Lock()
         self._start_lock = asyncio.Lock()
         self._session_lock = asyncio.Lock()

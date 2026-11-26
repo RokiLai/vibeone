@@ -64,6 +64,12 @@ class ACPRpcMixin:
                 if not raw:
                     break
                 line = raw.decode("utf-8", errors="replace").rstrip()
+                if line:
+                    buf = getattr(self, "_recent_stderr", None)
+                    if buf is not None:
+                        buf.append(line)
+                        if len(buf) > 30:
+                            del buf[:-30]
                 if any(k in line for k in ("ERROR", "E11", "Failed", "fatal", "panic")):
                     logger.warning("[agy stderr] %s", line)
                 else:
@@ -71,8 +77,29 @@ class ACPRpcMixin:
         except asyncio.CancelledError:
             pass
 
+    def _format_subprocess_exit_reason(
+        self, proc: asyncio.subprocess.Process, loop_error: Optional[Exception]
+    ) -> str:
+        rc = getattr(proc, "returncode", None)
+        stderr_buf = getattr(self, "_recent_stderr", None) or []
+        tail = " | ".join(stderr_buf[-3:]).strip()
+        if len(tail) > 300:
+            tail = tail[-300:]
+        if loop_error is not None:
+            base = f"ACP stdout loop failed ({type(loop_error).__name__}: {loop_error})"
+            if rc is not None:
+                base += f" [code={rc}]"
+        elif rc is not None:
+            base = f"ACP subprocess exited unexpectedly (code={rc})"
+        else:
+            base = "ACP subprocess exited unexpectedly"
+        if tail:
+            return f"{base}: {tail}"
+        return base
+
     async def _read_stdout_loop(self, proc: asyncio.subprocess.Process) -> None:
         assert proc and proc.stdout
+        loop_error: Optional[Exception] = None
         try:
             while True:
                 raw = await proc.stdout.readline()
@@ -86,14 +113,33 @@ class ACPRpcMixin:
                 except json.JSONDecodeError:
                     logger.warning("Non-JSON line from agy stdout: %s", line[:200])
                     continue
-                await self._handle_rpc_message(msg)
+                try:
+                    await self._handle_rpc_message(msg)
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:
+                    logger.exception(
+                        "Error handling RPC message (method=%s, id=%s): %s",
+                        msg.get("method"),
+                        msg.get("id"),
+                        exc,
+                    )
         except asyncio.CancelledError:
             return
         except Exception as exc:
+            loop_error = exc
             logger.exception("Error in ACP stdout loop: %s", exc)
         finally:
             self._flush_pending_items()
             if self.proc is proc:
+                if getattr(proc, "returncode", None) is None and loop_error is not None:
+                    try:
+                        proc.terminate()
+                    except ProcessLookupError:
+                        pass
+                    except Exception:
+                        logger.debug("Failed to terminate ACP subprocess after stdout loop error", exc_info=True)
+                exit_reason = self._format_subprocess_exit_reason(proc, loop_error)
                 self.connected = False
                 for rt in self._runtimes.values():
                     rt.is_busy = False
@@ -104,7 +150,7 @@ class ACPRpcMixin:
                 self._perm_to_sid.clear()
                 for fut in list(self._pending_rpc.values()):
                     if not fut.done():
-                        fut.set_exception(RuntimeError("ACP subprocess exited unexpectedly"))
+                        fut.set_exception(RuntimeError(exit_reason))
                 self._pending_rpc.clear()
                 self.last_error = "Agy 后台进程已退出，发送消息时将自动重启。"
                 await self.broadcast_status()
