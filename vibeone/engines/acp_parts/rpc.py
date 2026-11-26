@@ -92,6 +92,7 @@ class ACPRpcMixin:
         except Exception as exc:
             logger.exception("Error in ACP stdout loop: %s", exc)
         finally:
+            self._flush_pending_items()
             if self.proc is proc:
                 self.connected = False
                 for rt in self._runtimes.values():
@@ -282,11 +283,11 @@ class ACPRpcMixin:
                 item_id = f"asst_{uuid.uuid4().hex[:12]}"
                 rt.active_assistant_id = item_id
                 item = {"id": item_id, "type": "assistant", "text": text, "ts": time.time()}
-                self._add_or_update_item(item, sid=sid)
+                self._add_or_update_item(item, sid=sid, deferred=True)
             else:
                 item = rt.items_by_id[rt.active_assistant_id]
                 item["text"] += text
-                self._add_or_update_item(item, sid=sid)
+                self._add_or_update_item(item, sid=sid, deferred=True)
             await self.broadcast(
                 {
                     "type": "text_delta",
@@ -310,11 +311,11 @@ class ACPRpcMixin:
                 item_id = f"thought_{uuid.uuid4().hex[:12]}"
                 rt.active_thought_id = item_id
                 item = {"id": item_id, "type": "thought", "text": text, "ts": time.time()}
-                self._add_or_update_item(item, sid=sid)
+                self._add_or_update_item(item, sid=sid, deferred=True)
             else:
                 item = rt.items_by_id[rt.active_thought_id]
                 item["text"] += text
-                self._add_or_update_item(item, sid=sid)
+                self._add_or_update_item(item, sid=sid, deferred=True)
             await self.broadcast(
                 {
                     "type": "thought_delta",

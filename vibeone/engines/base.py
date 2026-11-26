@@ -81,6 +81,9 @@ class BaseEngineManager(ClientTransportMixin, EngineStateHelpersMixin):
         self._runtimes: Dict[str, SessionRuntime] = {}
         self._perm_to_sid: Dict[str, str] = {}
         self.session_id: Optional[str] = None
+        self._dirty_items: Dict[tuple, Dict[str, Any]] = {}
+        self._dirty_flush_handle: Optional[asyncio.TimerHandle] = None
+        self._dirty_flush_interval: float = 0.5
 
         # Fallback attributes when no session_id is active yet
         self._fallback_title: str = "VibeOne"

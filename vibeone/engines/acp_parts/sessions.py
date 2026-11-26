@@ -380,6 +380,7 @@ class ACPSessionsMixin:
             if not only_sids:
                 return []
 
+        self._flush_pending_items()
         profile = self.current_profile
         raw_hits = await asyncio.to_thread(
             self.store.search_sessions,

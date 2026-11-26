@@ -351,6 +351,7 @@ class ACPTurnsMixin:
             self._add_or_update_item(err_item, sid=sid)
             await self.broadcast({"type": "item_upsert", "data": err_item}, sid=sid)
         finally:
+            self._flush_pending_items(sid)
             if self.store.count_items(sid) > 0:
                 self.store.touch_session(sid)
             was_cancelled = rt.cancel_requested or stop_reason.lower() == "cancelled"

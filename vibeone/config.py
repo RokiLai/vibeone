@@ -1,7 +1,10 @@
+import atexit
 import logging
 import os
+import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 # ---------------------------------------------------------------------------
@@ -19,7 +22,15 @@ UPLOADS_DIR = BASE_DIR / "uploads"
 UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
 CODEX_MODEL_CACHE_DIR = BASE_DIR / ".cache" / "codex_models"
 LEGACY_DB_PATH = BASE_DIR / "agy_web.db"
-DB_PATH = BASE_DIR / "vibeone.db"
+_ENV_DB_PATH = os.environ.get("VIBEONE_DB_PATH", "").strip()
+if _ENV_DB_PATH:
+    DB_PATH = Path(_ENV_DB_PATH).expanduser()
+elif "unittest" in sys.modules or "pytest" in sys.modules:
+    _TEST_DB_DIR = Path(tempfile.mkdtemp(prefix="vibeone-test-db-"))
+    atexit.register(shutil.rmtree, _TEST_DB_DIR, True)
+    DB_PATH = _TEST_DB_DIR / "vibeone.db"
+else:
+    DB_PATH = BASE_DIR / "vibeone.db"
 RESTART_MARKER_FILE = BASE_DIR / ".restart_after_turn"
 VIBEONE_LAUNCHD_LABEL = (
     os.environ.get("VIBEONE_LAUNCHD_LABEL", "").strip()

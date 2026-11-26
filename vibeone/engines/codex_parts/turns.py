@@ -237,6 +237,7 @@ class CodexTurnsMixin:
             self._add_or_update_item(err_item, sid=sid)
             await self.broadcast({"type": "item_upsert", "data": err_item}, sid=sid)
         finally:
+            self._flush_pending_items(sid)
             self._compact_sids.discard(sid)
             self._turn_futures.pop(sid, None)
             self._thread_turn_ids.pop(sid, None)

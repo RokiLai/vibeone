@@ -10,29 +10,66 @@ from . import config
 logger = config.logger
 
 
+_FTS5_SCHEMA_VERSION = 2
+_FTS_MAX_TOOL_ARGS_CHARS = 2048
+_FTS_MAX_TOOL_OUTPUT_CHARS = 4096
+
+
 class StoreSearchMixin:
     """FTS5 trigram indexing and full-text search across sessions and items."""
 
-    def _init_fts5(self) -> None:
-        """Initialize FTS5 trigram index for items and backfill existing rows once."""
+    def _create_fts5_table(self) -> bool:
+        """Create items_fts using contentless_delete=1 when supported, else standard FTS5."""
         try:
             self._conn.execute(
                 """
                 CREATE VIRTUAL TABLE IF NOT EXISTS items_fts USING fts5(
-                    item_id UNINDEXED,
-                    session_id UNINDEXED,
-                    item_type UNINDEXED,
+                    content,
+                    content='',
+                    contentless_delete=1,
+                    tokenize='trigram'
+                )
+                """
+            )
+            self._fts5_contentless = True
+            return True
+        except sqlite3.OperationalError:
+            self._fts5_contentless = False
+        try:
+            self._conn.execute(
+                """
+                CREATE VIRTUAL TABLE IF NOT EXISTS items_fts USING fts5(
                     content,
                     tokenize='trigram'
                 )
                 """
             )
-            self._fts5_enabled = True
+            return True
         except sqlite3.OperationalError as exc:
             logger.warning("SQLite FTS5 trigram unavailable, falling back to LIKE search: %s", exc)
-            self._fts5_enabled = False
-            return
+            return False
 
+    def _clear_fts5_table(self) -> None:
+        if not self._fts5_enabled:
+            return
+        if getattr(self, "_fts5_contentless", False):
+            self._conn.execute("INSERT INTO items_fts(items_fts) VALUES('delete-all')")
+        else:
+            self._conn.execute("DELETE FROM items_fts")
+
+    def optimize_fts5(self) -> None:
+        """Merge FTS5 b-tree segments to reclaim space and keep search fast."""
+        if not self._fts5_enabled:
+            return
+        try:
+            self._conn.execute("INSERT INTO items_fts(items_fts) VALUES('optimize')")
+            self._conn.commit()
+        except sqlite3.OperationalError as exc:
+            logger.warning("SQLite FTS5 optimize failed: %s", exc)
+
+    def _init_fts5(self) -> None:
+        """Initialize FTS5 trigram index for items and migrate/backfill when schema version changes."""
+        self._fts5_contentless = False
         row = self._conn.execute("SELECT value FROM meta WHERE key = 'fts5_items_version'").fetchone()
         version = None
         if row:
@@ -40,50 +77,68 @@ class StoreSearchMixin:
                 version = json.loads(row[0])
             except Exception:
                 version = None
-        if version != 1:
+
+        if version != _FTS5_SCHEMA_VERSION:
+            self._conn.execute("DROP TABLE IF EXISTS items_fts")
+            self._fts5_enabled = self._create_fts5_table()
+            if not self._fts5_enabled:
+                return
             self._rebuild_fts5_index()
             self._conn.execute(
-                "INSERT INTO meta (key, value) VALUES ('fts5_items_version', '1') "
-                "ON CONFLICT(key) DO UPDATE SET value = excluded.value"
+                "INSERT INTO meta (key, value) VALUES ('fts5_items_version', ?) "
+                "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                (json.dumps(_FTS5_SCHEMA_VERSION),),
             )
+            return
+
+        # Already on current schema version: detect whether existing table is contentless
+        ddl_row = self._conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'items_fts'"
+        ).fetchone()
+        if ddl_row and ddl_row[0]:
+            self._fts5_enabled = True
+            self._fts5_contentless = "content=''" in str(ddl_row[0]).lower().replace(" ", "")
+        else:
+            self._fts5_enabled = self._create_fts5_table()
+            if self._fts5_enabled:
+                self._rebuild_fts5_index()
 
     def _rebuild_fts5_index(self) -> None:
         if not self._fts5_enabled:
             return
-        self._conn.execute("DELETE FROM items_fts")
+        self._clear_fts5_table()
         rows = self._conn.execute(
-            "SELECT item_id, session_id, item_type, payload FROM items"
+            "SELECT seq, payload FROM items"
         ).fetchall()
         fts_rows = []
-        for item_id, session_id, item_type, payload_str in rows:
+        for seq, payload_str in rows:
             try:
                 obj = json.loads(payload_str)
             except Exception:
                 continue
-            text = self._extract_item_search_text(obj) if isinstance(obj, dict) else ""
+            text = self._extract_item_search_text(obj, for_index=True) if isinstance(obj, dict) else ""
             if text:
-                fts_rows.append((item_id, session_id, item_type, text))
+                fts_rows.append((seq, text))
         if fts_rows:
             self._conn.executemany(
-                "INSERT INTO items_fts (item_id, session_id, item_type, content) VALUES (?, ?, ?, ?)",
+                "INSERT INTO items_fts (rowid, content) VALUES (?, ?)",
                 fts_rows,
             )
+            self._conn.execute("INSERT INTO items_fts(items_fts) VALUES('optimize')")
 
-    def _upsert_fts5_item(self, session_id: str, item: Dict[str, Any]) -> None:
+    def _upsert_fts5_item(self, seq: int, item: Dict[str, Any]) -> None:
         if not self._fts5_enabled:
             return
-        item_id = item["id"]
-        item_type = item["type"]
-        self._conn.execute("DELETE FROM items_fts WHERE item_id = ?", (item_id,))
-        text = self._extract_item_search_text(item)
+        self._conn.execute("DELETE FROM items_fts WHERE rowid = ?", (seq,))
+        text = self._extract_item_search_text(item, for_index=True)
         if text:
             self._conn.execute(
-                "INSERT INTO items_fts (item_id, session_id, item_type, content) VALUES (?, ?, ?, ?)",
-                (item_id, session_id, item_type, text),
+                "INSERT INTO items_fts (rowid, content) VALUES (?, ?)",
+                (seq, text),
             )
 
     @staticmethod
-    def _extract_item_search_text(item: Dict[str, Any]) -> str:
+    def _extract_item_search_text(item: Dict[str, Any], *, for_index: bool = False) -> str:
         item_type = str(item.get("type") or "")
         if item_type == "tool":
             parts: List[str] = []
@@ -98,6 +153,11 @@ class StoreSearchMixin:
                         s = str(val)
                 else:
                     s = str(val)
+                if for_index:
+                    if key == "output" and len(s) > _FTS_MAX_TOOL_OUTPUT_CHARS:
+                        s = s[:_FTS_MAX_TOOL_OUTPUT_CHARS]
+                    elif key == "args" and len(s) > _FTS_MAX_TOOL_ARGS_CHARS:
+                        s = s[:_FTS_MAX_TOOL_ARGS_CHARS]
                 if s:
                     parts.append(s)
             return "\n".join(parts)
@@ -245,30 +305,30 @@ class StoreSearchMixin:
                         existing["match_ts"] = float(created_at or 0.0)
                         existing["_prio"] = prio
 
-            if self._fts5_enabled:
+            if self._fts5_enabled and fts_terms:
                 where_parts: List[str] = ["s.profile = ?"]
                 params: List[Any] = [prof]
-                if fts_terms:
-                    match_expr = " AND ".join(
-                        '"' + t.replace('"', '""') + '"' for t in fts_terms
-                    )
-                    where_parts.append("items_fts MATCH ?")
-                    params.append(match_expr)
+                match_expr = " AND ".join(
+                    '"' + t.replace('"', '""') + '"' for t in fts_terms
+                )
+                where_parts.append("items_fts MATCH ?")
+                params.append(match_expr)
                 for sterm in short_terms:
+                    if '"' in sterm or "\\" in sterm:
+                        continue
                     escaped = sterm.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-                    where_parts.append("items_fts.content LIKE ? ESCAPE '\\'")
+                    where_parts.append("i.payload LIKE ? ESCAPE '\\'")
                     params.append(f"%{escaped}%")
 
                 cur = conn.execute(
                     f"""
-                    SELECT items_fts.session_id, items_fts.item_id, items_fts.item_type,
-                           items_fts.content, COALESCE(i.created_at, 0.0)
+                    SELECT i.session_id, i.item_id, i.item_type, i.payload, i.created_at
                     FROM items_fts
-                    INNER JOIN sessions s ON s.session_id = items_fts.session_id
-                    LEFT JOIN items i ON i.item_id = items_fts.item_id
+                    INNER JOIN items i ON i.seq = items_fts.rowid
+                    INNER JOIN sessions s ON s.session_id = i.session_id
                     WHERE {' AND '.join(where_parts)}
                     ORDER BY s.updated_at DESC,
-                             CASE items_fts.item_type
+                             CASE i.item_type
                                  WHEN 'user' THEN 0
                                  WHEN 'assistant' THEN 1
                                  WHEN 'error' THEN 2
@@ -279,8 +339,13 @@ class StoreSearchMixin:
                     """,
                     params,
                 )
-                for sid, item_id, item_type, content_text, created_at in cur:
-                    _record_hit(sid, item_id, item_type, content_text, created_at)
+                for sid, item_id, item_type, payload_str, created_at in cur:
+                    try:
+                        item_obj = json.loads(payload_str)
+                    except Exception:
+                        continue
+                    text = self._extract_item_search_text(item_obj)
+                    _record_hit(sid, item_id, item_type, text, created_at)
             else:
                 like_clauses: List[str] = []
                 params = [prof]

@@ -238,9 +238,9 @@ class CodexProtocolMixin:
             existing = rt.items_by_id.get(item_id)
             if existing:
                 existing["text"] += delta
-                self._add_or_update_item(existing, sid=sid)
+                self._add_or_update_item(existing, sid=sid, deferred=True)
             else:
-                self._add_or_update_item({"id": item_id, "type": "assistant", "text": delta, "ts": time.time()}, sid=sid)
+                self._add_or_update_item({"id": item_id, "type": "assistant", "text": delta, "ts": time.time()}, sid=sid, deferred=True)
             await self.broadcast({"type": "text_delta", "data": {"item_id": item_id, "delta": delta}}, sid=target_sid)
 
         elif method in ("item/reasoning/summaryTextDelta", "item/reasoning/textDelta"):
@@ -256,9 +256,9 @@ class CodexProtocolMixin:
             existing = rt.items_by_id.get(item_id)
             if existing:
                 existing["text"] += delta
-                self._add_or_update_item(existing, sid=sid)
+                self._add_or_update_item(existing, sid=sid, deferred=True)
             else:
-                self._add_or_update_item({"id": item_id, "type": "thought", "text": delta, "ts": time.time()}, sid=sid)
+                self._add_or_update_item({"id": item_id, "type": "thought", "text": delta, "ts": time.time()}, sid=sid, deferred=True)
             await self.broadcast({"type": "thought_delta", "data": {"item_id": item_id, "delta": delta}}, sid=target_sid)
 
         elif method == "item/commandExecution/outputDelta":
@@ -272,7 +272,7 @@ class CodexProtocolMixin:
             existing = rt.items_by_id.get(item_id)
             if existing:
                 existing["output"] = str(existing.get("output") or "") + delta
-                self._add_or_update_item(existing, sid=sid)
+                self._add_or_update_item(existing, sid=sid, deferred=True)
                 await self.broadcast({"type": "item_upsert", "data": existing}, sid=target_sid)
 
         elif method in ("item/started", "item/completed"):

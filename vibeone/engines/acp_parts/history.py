@@ -152,6 +152,7 @@ class ACPHistoryMixin:
             return {"ok": False, "synced": False, "added": 0, "reason": "no_session"}
 
         async with self._session_lock:
+            self._flush_pending_items(sid)
             await self.start()
             rt = self._runtimes.get(sid)
             if rt and rt.is_busy:
@@ -198,7 +199,52 @@ class ACPHistoryMixin:
                 "session_id": loaded_sid,
             }
 
-    def _add_or_update_item(self, item: Dict[str, Any], sid: Optional[str] = None) -> None:
+    def _schedule_dirty_flush(self) -> None:
+        handle = getattr(self, "_dirty_flush_handle", None)
+        if handle is not None and not handle.cancelled():
+            return
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            self._flush_pending_items()
+            return
+        interval = float(getattr(self, "_dirty_flush_interval", 0.5))
+        self._dirty_flush_handle = loop.call_later(interval, self._flush_pending_items)
+
+    def _flush_pending_items(self, sid: Optional[str] = None) -> None:
+        dirty = getattr(self, "_dirty_items", None)
+        if not dirty:
+            if sid is None:
+                handle = getattr(self, "_dirty_flush_handle", None)
+                if handle is not None and not handle.cancelled():
+                    handle.cancel()
+                self._dirty_flush_handle = None
+            return
+        if sid is None:
+            entries = [(k[0], v) for k, v in dirty.items()]
+            dirty.clear()
+            handle = getattr(self, "_dirty_flush_handle", None)
+            if handle is not None and not handle.cancelled():
+                handle.cancel()
+            self._dirty_flush_handle = None
+        else:
+            keys = [k for k in dirty if k[0] == sid]
+            entries = [(k[0], dirty.pop(k)) for k in keys]
+            if not dirty:
+                handle = getattr(self, "_dirty_flush_handle", None)
+                if handle is not None and not handle.cancelled():
+                    handle.cancel()
+                self._dirty_flush_handle = None
+        if entries:
+            self.store.upsert_items(entries)
+
+    def _add_or_update_item(
+        self,
+        item: Dict[str, Any],
+        sid: Optional[str] = None,
+        *,
+        deferred: bool = False,
+    ) -> None:
         target_sid = sid or self.session_id
         item_id = item["id"]
         if target_sid:
@@ -208,7 +254,24 @@ class ACPHistoryMixin:
             else:
                 rt.items.append(item)
                 rt.items_by_id[item_id] = item
-            self.store.upsert_item(target_sid, rt.items_by_id[item_id])
+            stored_item = rt.items_by_id[item_id]
+            dirty = getattr(self, "_dirty_items", None)
+            if deferred and dirty is not None:
+                dirty[(target_sid, item_id)] = stored_item
+                self._schedule_dirty_flush()
+            else:
+                if dirty:
+                    keys = [k for k in dirty if k[0] == target_sid]
+                    entries = [(k[0], dirty.pop(k)) for k in keys if k[1] != item_id]
+                    entries.append((target_sid, stored_item))
+                    if not dirty:
+                        handle = getattr(self, "_dirty_flush_handle", None)
+                        if handle is not None and not handle.cancelled():
+                            handle.cancel()
+                        self._dirty_flush_handle = None
+                    self.store.upsert_items(entries)
+                else:
+                    self.store.upsert_item(target_sid, stored_item)
         else:
             if item_id in self._fallback_items_by_id:
                 self._fallback_items_by_id[item_id].update(item)

@@ -351,6 +351,7 @@ class ACPLifecycleMixin:
         return model_id
 
     async def _stop_unlocked(self) -> None:
+        self._flush_pending_items()
         self.connected = False
         if self._acp_session_list_bg_refresh and not self._acp_session_list_bg_refresh.done():
             self._acp_session_list_bg_refresh.cancel()

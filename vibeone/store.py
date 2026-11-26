@@ -218,9 +218,12 @@ class SessionStore(StoreAuthMixin, StoreSearchMixin):
         if not session_id:
             return
         with self._conn:
-            cur = self._conn.execute("DELETE FROM items WHERE session_id = ?", (session_id,))
-            if self._fts5_enabled and cur.rowcount > 0:
-                self._conn.execute("DELETE FROM items_fts WHERE session_id = ?", (session_id,))
+            if self._fts5_enabled:
+                self._conn.execute(
+                    "DELETE FROM items_fts WHERE rowid IN (SELECT seq FROM items WHERE session_id = ?)",
+                    (session_id,),
+                )
+            self._conn.execute("DELETE FROM items WHERE session_id = ?", (session_id,))
             self._conn.execute("DELETE FROM sessions WHERE session_id = ?", (session_id,))
         if self._sessions_with_items_cache is not None:
             self._sessions_with_items_cache.discard(session_id)
@@ -242,8 +245,7 @@ class SessionStore(StoreAuthMixin, StoreSearchMixin):
         except Exception:
             return default
 
-    def upsert_item(self, session_id: str, item: Dict[str, Any]) -> None:
-        now = time.time()
+    def _upsert_item_no_commit(self, session_id: str, item: Dict[str, Any], now: float) -> None:
         item_id = item["id"]
         item_type = item["type"]
         created_at = item.get("ts", now)
@@ -258,10 +260,33 @@ class SessionStore(StoreAuthMixin, StoreSearchMixin):
             """,
             (item_id, session_id, item_type, payload, created_at, now),
         )
-        self._upsert_fts5_item(session_id, item)
+        if self._fts5_enabled:
+            row = self._conn.execute(
+                "SELECT seq FROM items WHERE item_id = ?",
+                (item_id,),
+            ).fetchone()
+            if row:
+                self._upsert_fts5_item(int(row[0]), item)
+
+    def upsert_item(self, session_id: str, item: Dict[str, Any]) -> None:
+        now = time.time()
+        self._upsert_item_no_commit(session_id, item, now)
         self._conn.commit()
         if self._sessions_with_items_cache is not None and session_id:
             self._sessions_with_items_cache.add(session_id)
+
+    def upsert_items(self, entries: List[tuple]) -> None:
+        """Batch-upsert (session_id, item) pairs inside a single SQLite transaction."""
+        if not entries:
+            return
+        now = time.time()
+        with self._conn:
+            for session_id, item in entries:
+                self._upsert_item_no_commit(session_id, item, now)
+        if self._sessions_with_items_cache is not None:
+            for session_id, _ in entries:
+                if session_id:
+                    self._sessions_with_items_cache.add(session_id)
 
     def load_items(self, session_id: Optional[str] = None, limit: int = 2000) -> List[Dict[str, Any]]:
         if session_id:
@@ -341,14 +366,17 @@ class SessionStore(StoreAuthMixin, StoreSearchMixin):
 
     def clear_session(self, session_id: Optional[str] = None) -> None:
         if session_id:
-            cur = self._conn.execute("DELETE FROM items WHERE session_id = ?", (session_id,))
-            if self._fts5_enabled and cur.rowcount > 0:
-                self._conn.execute("DELETE FROM items_fts WHERE session_id = ?", (session_id,))
+            if self._fts5_enabled:
+                self._conn.execute(
+                    "DELETE FROM items_fts WHERE rowid IN (SELECT seq FROM items WHERE session_id = ?)",
+                    (session_id,),
+                )
+            self._conn.execute("DELETE FROM items WHERE session_id = ?", (session_id,))
             if self._sessions_with_items_cache is not None:
                 self._sessions_with_items_cache.discard(session_id)
         else:
             if self._fts5_enabled:
-                self._conn.execute("DELETE FROM items_fts")
+                self._clear_fts5_table()
             self._conn.execute("DELETE FROM items")
             if self._sessions_with_items_cache is not None:
                 self._sessions_with_items_cache.clear()
@@ -357,11 +385,14 @@ class SessionStore(StoreAuthMixin, StoreSearchMixin):
     def replace_session_items(self, session_id: str, items: List[Dict[str, Any]]) -> None:
         now = time.time()
         with self._conn:
-            cur = self._conn.execute("DELETE FROM items WHERE session_id = ?", (session_id,))
-            if self._fts5_enabled and cur.rowcount > 0:
-                self._conn.execute("DELETE FROM items_fts WHERE session_id = ?", (session_id,))
+            if self._fts5_enabled:
+                self._conn.execute(
+                    "DELETE FROM items_fts WHERE rowid IN (SELECT seq FROM items WHERE session_id = ?)",
+                    (session_id,),
+                )
+            self._conn.execute("DELETE FROM items WHERE session_id = ?", (session_id,))
             rows = []
-            fts_rows = []
+            items_by_id: Dict[str, Dict[str, Any]] = {}
             for it in items:
                 created_at = float(it.get("ts", now))
                 rows.append(
@@ -374,10 +405,7 @@ class SessionStore(StoreAuthMixin, StoreSearchMixin):
                         now,
                     )
                 )
-                if self._fts5_enabled:
-                    text = self._extract_item_search_text(it)
-                    if text:
-                        fts_rows.append((it["id"], session_id, it["type"], text))
+                items_by_id[it["id"]] = it
             if rows:
                 self._conn.executemany(
                     """
@@ -387,11 +415,24 @@ class SessionStore(StoreAuthMixin, StoreSearchMixin):
                     """,
                     rows,
                 )
-            if fts_rows:
-                self._conn.executemany(
-                    "INSERT INTO items_fts (item_id, session_id, item_type, content) VALUES (?, ?, ?, ?)",
-                    fts_rows,
-                )
+                if self._fts5_enabled:
+                    seq_rows = self._conn.execute(
+                        "SELECT seq, item_id FROM items WHERE session_id = ?",
+                        (session_id,),
+                    ).fetchall()
+                    fts_rows = []
+                    for seq, iid in seq_rows:
+                        it = items_by_id.get(iid)
+                        if it is None:
+                            continue
+                        text = self._extract_item_search_text(it, for_index=True)
+                        if text:
+                            fts_rows.append((seq, text))
+                    if fts_rows:
+                        self._conn.executemany(
+                            "INSERT INTO items_fts (rowid, content) VALUES (?, ?)",
+                            fts_rows,
+                        )
         if self._sessions_with_items_cache is not None and session_id:
             if rows:
                 self._sessions_with_items_cache.add(session_id)
@@ -400,7 +441,8 @@ class SessionStore(StoreAuthMixin, StoreSearchMixin):
 
 
 def ensure_migrated_db_path() -> Path:
-    if not config.DB_PATH.exists() and config.LEGACY_DB_PATH.exists():
+    default_db_path = config.BASE_DIR / "vibeone.db"
+    if config.DB_PATH == default_db_path and not config.DB_PATH.exists() and config.LEGACY_DB_PATH.exists():
         try:
             for suffix in ("", "-wal", "-shm"):
                 src = Path(f"{config.LEGACY_DB_PATH}{suffix}")

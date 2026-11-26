@@ -228,6 +228,95 @@ class SessionFullTextSearchTest(unittest.IsolatedAsyncioTestCase):
         self.store.delete_session("s_a_tool")
         self.assertEqual(self.store.search_sessions("agy2", "AssertionError"), [])
 
+    async def test_fts5_v2_migration_tool_output_truncation_and_clear(self) -> None:
+        # Verify v2 schema & contentless_delete on SQLite >= 3.43
+        self.assertEqual(self.store.get_meta("fts5_items_version"), 2)
+
+        # Tool output beyond 4096 chars is preserved in items payload but truncated in FTS index
+        long_output = "head_marker_alpha " + ("x" * 5000) + " tail_marker_omega"
+        self.store.upsert_item(
+            "s_a_tool",
+            {
+                "id": "i_long_tool",
+                "type": "tool",
+                "name": "run_command",
+                "output": long_output,
+                "ts": 410.0,
+            },
+        )
+        stored = self.store.get_item("i_long_tool")
+        self.assertIsNotNone(stored)
+        self.assertIn("tail_marker_omega", stored["output"])
+        self.assertEqual(
+            [h["session_id"] for h in self.store.search_sessions("agy2", "head_marker_alpha")],
+            ["s_a_tool"],
+        )
+        self.assertEqual(self.store.search_sessions("agy2", "tail_marker_omega"), [])
+
+        # Clear single session removes its FTS entries cleanly
+        self.store.clear_session("s_a_tool")
+        self.assertEqual(self.store.search_sessions("agy2", "head_marker_alpha"), [])
+
+        # Re-opening DB with old fts5_items_version=1 triggers clean v2 rebuild
+        db_path = self.root / "search_test.db"
+        self.store.set_meta("fts5_items_version", 1)
+        reopened = SessionStore(db_path)
+        try:
+            self.assertEqual(reopened.get_meta("fts5_items_version"), 2)
+            self.assertEqual(
+                [h["session_id"] for h in reopened.search_sessions("agy2", "webpush")],
+                ["s_a_main", "s_a_hidden_sess", "s_a_hidden_dir"],
+            )
+            reopened.optimize_fts5()
+        finally:
+            reopened._conn.close()
+
+    async def test_streaming_deferred_upsert_coalesces_and_flushes(self) -> None:
+        import asyncio
+
+        upsert_calls = []
+        orig_upsert_items = self.store.upsert_items
+
+        def _spy_upsert_items(entries):
+            upsert_calls.append(len(entries))
+            return orig_upsert_items(entries)
+
+        self.store.upsert_items = _spy_upsert_items
+        self.mgr_agy2._dirty_flush_interval = 0.05
+        sid = "s_a_main"
+        item = {"id": "asst_stream_1", "type": "assistant", "text": "part1", "ts": 600.0}
+        self.mgr_agy2._add_or_update_item(item, sid=sid, deferred=True)
+        item["text"] += " part2_unique_stream"
+        self.mgr_agy2._add_or_update_item(item, sid=sid, deferred=True)
+        item["text"] += " part3"
+        self.mgr_agy2._add_or_update_item(item, sid=sid, deferred=True)
+
+        # In-memory state is updated immediately; DB write is deferred
+        self.assertEqual(upsert_calls, [])
+        self.assertEqual(
+            self.mgr_agy2._runtimes[sid].items_by_id["asst_stream_1"]["text"],
+            "part1 part2_unique_stream part3",
+        )
+
+        # Wait for scheduled timer flush
+        await asyncio.sleep(0.1)
+        self.assertEqual(upsert_calls, [1])
+        saved = self.store.get_item("asst_stream_1")
+        self.assertIsNotNone(saved)
+        self.assertEqual(saved["text"], "part1 part2_unique_stream part3")
+        self.assertEqual(
+            [h["session_id"] for h in self.store.search_sessions("agy2", "part2_unique_stream")],
+            [sid],
+        )
+
+    async def test_server_import_uses_isolated_test_db_path(self) -> None:
+        from vibeone import config
+
+        self.assertNotEqual(
+            Path(server.store.db_path).resolve(),
+            (config.BASE_DIR / "vibeone.db").resolve(),
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
