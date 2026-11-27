@@ -1,4 +1,47 @@
-    function renderSidebarSessions() {
+    let _sidebarPointerActive = false;
+    let _sidebarRenderDeferred = false;
+    let _sidebarPointerTimer = null;
+
+    function _releaseSidebarPointerLock() {
+      if (_sidebarPointerTimer) {
+        clearTimeout(_sidebarPointerTimer);
+        _sidebarPointerTimer = null;
+      }
+      if (!_sidebarPointerActive) return;
+      setTimeout(() => {
+        _sidebarPointerActive = false;
+        if (_sidebarRenderDeferred) {
+          _sidebarRenderDeferred = false;
+          renderSidebarSessions({ force: true });
+        }
+      }, 0);
+    }
+
+    if (els.sidebarSessions && typeof els.sidebarSessions.addEventListener === 'function') {
+      els.sidebarSessions.addEventListener('pointerdown', () => {
+        _sidebarPointerActive = true;
+        if (_sidebarPointerTimer) clearTimeout(_sidebarPointerTimer);
+        _sidebarPointerTimer = setTimeout(() => {
+          _sidebarPointerTimer = null;
+          _sidebarPointerActive = false;
+          if (_sidebarRenderDeferred) {
+            _sidebarRenderDeferred = false;
+            renderSidebarSessions({ force: true });
+          }
+        }, 600);
+      });
+    }
+    if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+      window.addEventListener('pointerup', _releaseSidebarPointerLock, { passive: true });
+      window.addEventListener('pointercancel', _releaseSidebarPointerLock, { passive: true });
+    }
+
+    function renderSidebarSessions(opts = {}) {
+      if (_sidebarPointerActive && !(opts && opts.force)) {
+        _sidebarRenderDeferred = true;
+        return;
+      }
+      _sidebarRenderDeferred = false;
       updateArchivedBadge();
       if (els.settingsModal && !els.settingsModal.classList.contains('hidden') && state.settingsView === 'archived') {
         renderArchivedSessionsList();
@@ -37,11 +80,17 @@
         ensureGroup(currentWorkdirKey);
       }
 
+      const isSessionCurrent = (s) => {
+        if (!s || !s.session_id) return false;
+        if (state.currentSessionId) return s.session_id === state.currentSessionId;
+        return Boolean(s.isCurrent || s.is_current);
+      };
+
       const addSessionToGroup = (s) => {
         if (!s || !s.session_id || seenSessionIds.has(s.session_id)) return;
         seenSessionIds.add(s.session_id);
         const grp = ensureGroup(s.cwd);
-        const isCurrent = s.is_current || s.session_id === state.currentSessionId;
+        const isCurrent = isSessionCurrent(s);
         if (isCurrent) grp.hasCurrent = true;
         const tsVal = Number(s.updated_at || 0);
         grp.latestTs = Math.max(grp.latestTs, tsVal);
@@ -99,8 +148,8 @@
       });
 
       const getSessionActivity = (s) => {
-        const isCurrent = Boolean(s.isCurrent || s.session_id === state.currentSessionId);
-        const sessBusy = Boolean(s.is_busy || (isCurrent && state.isBusy));
+        const isCurrent = isSessionCurrent(s);
+        const sessBusy = isCurrent ? Boolean(state.isBusy) : Boolean(s.is_busy);
         const sessPerm = Math.max(
           Number(s.pending_permissions || 0),
           isCurrent ? state.pendingPermissions.size : 0
@@ -111,13 +160,25 @@
       const switchToSidebarSession = (s, isCurrent) => {
         closeSidebar();
         if (!isCurrent) {
-          showToast(`正在加载「${s.title || '会话'}」...`);
-          sendWs({
+          const sent = sendWs({
             type: 'switch_session',
             session_id: s.session_id,
             workdir: s.cwd,
             title: s.title,
           });
+          if (!sent) return;
+          if (typeof cacheCurrentSessionView === 'function') cacheCurrentSessionView();
+          const restored =
+            typeof restoreCachedSessionView === 'function' &&
+            restoreCachedSessionView(state.currentProfile, s.session_id);
+          if (!restored) {
+            state.currentSessionId = s.session_id;
+            if (s.cwd) state.currentWorkdir = s.cwd;
+            if (typeof showSessionSwitchPlaceholder === 'function') {
+              showSessionSwitchPlaceholder(s.title || '会话', s.cwd);
+            }
+          }
+          renderSidebarSessions({ force: true });
         } else if (!state.isBusy) {
           syncCurrentSession({ silent: false });
         }
@@ -266,7 +327,7 @@
           }
 
           grp.sessions.forEach((s) => {
-            const isCurrent = s.isCurrent || s.session_id === state.currentSessionId;
+            const isCurrent = isSessionCurrent(s);
             const isSelected = isBatchDir && state.batchSelectedIds.has(s.session_id);
             const rowWrap = document.createElement('div');
             rowWrap.className = `group/sess rounded-xl transition flex items-center gap-1 pr-1 ${

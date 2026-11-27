@@ -1,5 +1,7 @@
 import os
 import re
+import shutil
+import subprocess
 import unittest
 from html.parser import HTMLParser
 
@@ -82,3 +84,162 @@ class FrontendAssetTest(unittest.IsolatedAsyncioTestCase):
         for url in APP_SCRIPTS:
             with self.subTest(url=url):
                 self.assertEqual(urls.count(url), 1)
+
+    def test_sidebar_stale_is_current_does_not_flash_idle_session_as_running(self):
+        jsc = "/System/Library/Frameworks/JavaScriptCore.framework/Versions/Current/Helpers/jsc"
+        if not os.path.isfile(jsc):
+            jsc = shutil.which("jsc") or ""
+        if not jsc:
+            self.skipTest("JavaScriptCore (jsc) not available")
+
+        sidebar_js = (server.config.BASE_DIR / "static" / "app-sidebar.js").read_text(encoding="utf-8")
+        harness = f"""
+const els = {{
+  settingsModal: null,
+  sidebarSearch: {{ value: '' }},
+  sidebarSessions: {{ innerHTML: '', appendChild() {{}} }},
+}};
+const state = {{
+  currentSessionId: 'sess-running',
+  currentWorkdir: '/tmp/proj',
+  currentProfile: 'agy2',
+  isBusy: true,
+  pendingPermissions: new Map(),
+  sessionsCache: [
+    {{ session_id: 'sess-running', cwd: '/tmp/proj', title: 'Running', updated_at: 20, is_busy: true, is_current: false }},
+    {{ session_id: 'sess-idle', cwd: '/tmp/proj', title: 'Idle', updated_at: 10, is_busy: false, is_current: true }},
+  ],
+  sidebarSearchQuery: '',
+  sidebarSearchProfile: '',
+  sidebarSearchHits: new Map(),
+  sidebarSearchLoading: false,
+  batchArchiveDir: null,
+  batchSelectedIds: new Set(),
+  collapsedDirs: new Set(),
+}};
+const document = {{
+  createElement() {{
+    return {{
+      className: '',
+      title: '',
+      innerHTML: '',
+      textContent: '',
+      children: [],
+      addEventListener() {{}},
+      appendChild(c) {{ this.children.push(c); }},
+    }};
+  }},
+}};
+function updateArchivedBadge() {{}}
+function normalizeDirKey(p) {{ return String(p || '').replace(/\\/+$/, '') || '/'; }}
+function basenamePath(p) {{ return String(p || '').split('/').filter(Boolean).pop() || '/'; }}
+function parentPathHint() {{ return ''; }}
+function escapeHtml(s) {{ return String(s || ''); }}
+function formatRelativeTime() {{ return ''; }}
+function closeSidebar() {{}}
+function showToast() {{}}
+function sendWs() {{}}
+function syncCurrentSession() {{}}
+function exitBatchArchiveMode() {{}}
+let captured = [];
+function renderSidebarRunningSection(groups, dirNameCounts, getSessionActivity) {{
+  groups.forEach((grp) => {{
+    grp.sessions.forEach((s) => {{
+      const act = getSessionActivity(s);
+      captured.push({{ id: s.session_id, isCurrent: act.isCurrent, sessBusy: act.sessBusy }});
+    }});
+  }});
+}}
+{sidebar_js}
+renderSidebarSessions();
+print(JSON.stringify(captured));
+"""
+        res = subprocess.run([jsc, "-e", harness], capture_output=True, text=True, check=True)
+        import json
+        captured = {row["id"]: row for row in json.loads(res.stdout.strip())}
+        self.assertEqual(
+            captured["sess-running"],
+            {"id": "sess-running", "isCurrent": True, "sessBusy": True},
+        )
+        self.assertEqual(
+            captured["sess-idle"],
+            {"id": "sess-idle", "isCurrent": False, "sessBusy": False},
+        )
+
+    def test_sidebar_defers_rerender_while_pointer_is_down(self):
+        jsc = "/System/Library/Frameworks/JavaScriptCore.framework/Versions/Current/Helpers/jsc"
+        if not os.path.isfile(jsc):
+            jsc = shutil.which("jsc") or ""
+        if not jsc:
+            self.skipTest("JavaScriptCore (jsc) not available")
+
+        sidebar_js = (server.config.BASE_DIR / "static" / "app-sidebar.js").read_text(encoding="utf-8")
+        harness = f"""
+const listeners = {{}};
+const winListeners = {{}};
+let renderCount = 0;
+let queuedTimers = [];
+function setTimeout(fn) {{ queuedTimers.push(fn); return queuedTimers.length; }}
+function clearTimeout() {{}}
+const window = {{
+  addEventListener(ev, fn) {{ winListeners[ev] = fn; }},
+}};
+const els = {{
+  settingsModal: null,
+  sidebarSearch: {{ value: '' }},
+  sidebarSessions: {{
+    innerHTML: '',
+    addEventListener(ev, fn) {{ listeners[ev] = fn; }},
+    appendChild() {{}},
+  }},
+}};
+const state = {{
+  currentSessionId: 's1',
+  currentWorkdir: '/tmp/p',
+  currentProfile: 'agy2',
+  isBusy: false,
+  pendingPermissions: new Map(),
+  sessionsCache: [{{ session_id: 's1', cwd: '/tmp/p', title: 'S1', updated_at: 10 }}],
+  sidebarSearchQuery: '',
+  sidebarSearchProfile: '',
+  sidebarSearchHits: new Map(),
+  sidebarSearchLoading: false,
+  batchArchiveDir: null,
+  batchSelectedIds: new Set(),
+  collapsedDirs: new Set(),
+}};
+const document = {{
+  createElement() {{
+    return {{ className: '', title: '', innerHTML: '', textContent: '', addEventListener() {{}}, appendChild() {{}} }};
+  }},
+}};
+function updateArchivedBadge() {{ renderCount += 1; }}
+function normalizeDirKey(p) {{ return p || '/'; }}
+function basenamePath(p) {{ return 'p'; }}
+function parentPathHint() {{ return ''; }}
+function escapeHtml(s) {{ return String(s || ''); }}
+function formatRelativeTime() {{ return ''; }}
+function closeSidebar() {{}}
+function showToast() {{}}
+function sendWs() {{ return true; }}
+function syncCurrentSession() {{}}
+function exitBatchArchiveMode() {{}}
+function renderSidebarRunningSection() {{}}
+{sidebar_js}
+renderSidebarSessions();
+const countBefore = renderCount;
+listeners.pointerdown();
+renderSidebarSessions();
+const countDuringPress = renderCount;
+winListeners.pointerup();
+const releaseCb = queuedTimers.pop();
+if (releaseCb) releaseCb();
+const countAfterRelease = renderCount;
+print(JSON.stringify({{ countBefore, countDuringPress, countAfterRelease }}));
+"""
+        res = subprocess.run([jsc, "-e", harness], capture_output=True, text=True, check=True)
+        import json
+        out = json.loads(res.stdout.strip())
+        self.assertEqual(out["countBefore"], 1)
+        self.assertEqual(out["countDuringPress"], 1)
+        self.assertEqual(out["countAfterRelease"], 2)

@@ -147,7 +147,7 @@
         }
         const body = node.querySelector('.md-body');
         if (bulk) {
-          renderMarkdownInto(body, item.text || '');
+          renderMarkdownInto(body, item.text || '', { deferHighlight: true });
         } else {
           clearTimeout(state.renderTimers.get(item.id));
           state.renderTimers.set(

@@ -150,7 +150,7 @@
         if (!el || el.nodeType !== 1) return false;
         if (SKIP_TAGS.has(el.tagName)) return true;
         if (el.getAttribute('data-i18n-skip') === '1') return true;
-        if (el.classList && (el.classList.contains('markdown-body') || el.classList.contains('user-msg-text'))) {
+        if (el.classList && (el.classList.contains('md-body') || el.classList.contains('markdown-body') || el.classList.contains('user-msg-text'))) {
           return true;
         }
         return false;
@@ -284,7 +284,7 @@
             const m = mutations[i];
             if (m.type === 'characterData') {
               const p = m.target.parentElement;
-              if (p && !p.closest('pre, script, style, textarea, .markdown-body, .user-msg-text, [data-i18n-skip="1"]')) {
+              if (p && !p.closest('pre, script, style, textarea, .md-body, .markdown-body, .user-msg-text, [data-i18n-skip="1"]')) {
                 processTextNode(m.target);
               }
             } else if (m.type === 'attributes') {
@@ -295,7 +295,7 @@
               for (let j = 0; j < m.addedNodes.length; j++) {
                 const n = m.addedNodes[j];
                 const parentEl = n.nodeType === 1 ? n : n.parentElement;
-                if (parentEl && parentEl.closest && parentEl.closest('pre, script, style, textarea, .markdown-body, .user-msg-text, [data-i18n-skip="1"]')) {
+                if (parentEl && parentEl.closest && parentEl.closest('pre, script, style, textarea, .md-body, .markdown-body, .user-msg-text, [data-i18n-skip="1"]')) {
                   continue;
                 }
                 const walk = (node) => {

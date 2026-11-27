@@ -208,23 +208,28 @@ def build_ws_router(
                     title = msg.get("title")
                     if sid:
                         try:
-                            loaded_sid = await mgr.switch_session(
-                                sid,
-                                workdir=workdir,
-                                title=title,
-                                broadcast_all=False,
-                                current_sid=cur_sid,
-                                exclude_ws=ws,
-                            )
-                            manager.set_client_view(ws, mgr.current_profile, loaded_sid)
-                            rt = mgr._runtimes.get(loaded_sid)
-                            dir_path = rt.workdir if rt else mgr.workdir
-                            dir_name = Path(dir_path).name or dir_path
-                            sess_title = rt.title if rt else mgr.session_title
-                            await _send_json({"type": "snapshot", "data": mgr.get_snapshot(sid=loaded_sid)})
-                            await _send_json(
-                                {"type": "toast", "data": {"level": "info", "message": f"已切换到 {dir_name} · {sess_title}"}}
-                            )
+                            if hasattr(mgr, "can_fast_switch_local") and mgr.can_fast_switch_local(sid):
+                                mgr._get_or_create_runtime(sid, workdir=workdir, title=title)
+                                manager.set_client_view(ws, mgr.current_profile, sid)
+                                await _send_json({"type": "snapshot", "data": mgr.get_snapshot(sid=sid)})
+                                mgr.schedule_background_resume(
+                                    sid,
+                                    workdir=workdir,
+                                    title=title,
+                                    current_sid=cur_sid,
+                                    exclude_ws=ws,
+                                )
+                            else:
+                                loaded_sid = await mgr.switch_session(
+                                    sid,
+                                    workdir=workdir,
+                                    title=title,
+                                    broadcast_all=False,
+                                    current_sid=cur_sid,
+                                    exclude_ws=ws,
+                                )
+                                manager.set_client_view(ws, mgr.current_profile, loaded_sid)
+                                await _send_json({"type": "snapshot", "data": mgr.get_snapshot(sid=loaded_sid)})
                         except Exception as exc:
                             await _send_json({"type": "toast", "data": {"level": "error", "message": str(exc)}})
                 elif action == "remove_session":

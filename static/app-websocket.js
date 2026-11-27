@@ -202,7 +202,12 @@
             prevSid &&
             snap.session_id === prevSid &&
             (!snap.current_profile || snap.current_profile === prevProfile);
-          let unchanged = sameSession && nextTotal === state.totalItems && state.items.length >= nextItems.length;
+          const hasSwitchPlaceholder = Boolean(document.getElementById('session-switch-placeholder'));
+          let unchanged =
+            sameSession &&
+            !hasSwitchPlaceholder &&
+            nextTotal === state.totalItems &&
+            state.items.length >= nextItems.length;
           if (unchanged) {
             for (let i = Math.max(0, nextItems.length - 6); i < nextItems.length; i++) {
               const ni = nextItems[i];
@@ -223,10 +228,11 @@
             }
           }
           if (!unchanged) {
-            // If same session and the user has already loaded older history, merge tail updates without wiping loaded pages
+            // If same session and the user has cached/loaded history overlapping the new snapshot, merge tail without wiping DOM
             const canMergeTail =
               sameSession &&
-              state.items.length > nextItems.length &&
+              !hasSwitchPlaceholder &&
+              state.items.length > 0 &&
               nextItems.length > 0 &&
               state.itemsById.has(nextItems[0].id);
             if (canMergeTail) {
@@ -239,6 +245,15 @@
                 createOrUpdateItemDom(merged);
               }
             } else {
+              if (!sameSession && prevSid && typeof cacheCurrentSessionView === 'function') {
+                const curSidAfter = state.currentSessionId;
+                const curProfAfter = state.currentProfile;
+                state.currentSessionId = prevSid;
+                state.currentProfile = prevProfile;
+                cacheCurrentSessionView();
+                state.currentSessionId = curSidAfter;
+                state.currentProfile = curProfAfter;
+              }
               state.totalItems = nextTotal;
               state.itemsOffset = nextOffset;
               state.hasMoreItems = nextHasMore;

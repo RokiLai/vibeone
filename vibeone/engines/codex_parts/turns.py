@@ -121,6 +121,7 @@ class CodexTurnsMixin:
         early_stop_msg = ""
         was_slash_cmd = prompt_text.lstrip().startswith("/")
         try:
+            await self.await_session_resume(sid)
             clean_prompt = prompt_text.strip()
             low_prompt = clean_prompt.lower()
             is_compact = low_prompt == "/compact" or low_prompt.startswith("/compact ")

@@ -96,11 +96,106 @@
       }
     }
 
+    const SESSION_VIEW_CACHE_MAX = 8;
+    const _sessionViewCache = new Map();
+
+    function _sessionCacheKey(profile, sessionId) {
+      return `${String(profile || '')}::${String(sessionId || '')}`;
+    }
+
+    function cacheCurrentSessionView() {
+      const sid = state.currentSessionId;
+      if (!sid || !state.items.length) return;
+      if (document.getElementById('session-switch-placeholder')) return;
+      const nodes = Array.from(
+        els.chatList.querySelectorAll(':scope > [data-item-id], :scope > details.process-group, :scope > #load-older-bar')
+      );
+      if (!nodes.length) return;
+      const frag = document.createDocumentFragment();
+      nodes.forEach((n) => frag.appendChild(n));
+      const key = _sessionCacheKey(state.currentProfile, sid);
+      _sessionViewCache.delete(key);
+      _sessionViewCache.set(key, {
+        profile: state.currentProfile || '',
+        sessionId: sid,
+        title: els.sessionTitle ? els.sessionTitle.textContent : '',
+        workdir: state.currentWorkdir || '',
+        items: state.items.slice(),
+        totalItems: state.totalItems,
+        itemsOffset: state.itemsOffset,
+        hasMoreItems: state.hasMoreItems,
+        scrollTop: els.chatScroll ? els.chatScroll.scrollTop : 0,
+        fragment: frag,
+      });
+      while (_sessionViewCache.size > SESSION_VIEW_CACHE_MAX) {
+        const oldestKey = _sessionViewCache.keys().next().value;
+        _sessionViewCache.delete(oldestKey);
+      }
+    }
+
+    function restoreCachedSessionView(profile, sessionId) {
+      const key = _sessionCacheKey(profile, sessionId);
+      const entry = _sessionViewCache.get(key);
+      if (!entry) return false;
+      _sessionViewCache.delete(key);
+      if (typeof clearPendingCodeHighlights === 'function') clearPendingCodeHighlights();
+      state.suppressAutoLoadUntil = Date.now() + 500;
+      els.chatList
+        .querySelectorAll('[data-item-id], details.process-group, #load-older-bar, #session-switch-placeholder')
+        .forEach((el) => el.remove());
+      els.emptyState.classList.add('hidden');
+      state.currentSessionId = entry.sessionId;
+      if (entry.workdir) state.currentWorkdir = entry.workdir;
+      state.items = entry.items;
+      state.itemsById.clear();
+      for (const it of state.items) state.itemsById.set(it.id, it);
+      state.totalItems = entry.totalItems;
+      state.itemsOffset = entry.itemsOffset;
+      state.hasMoreItems = entry.hasMoreItems;
+      state.loadingOlderItems = false;
+      els.chatList.appendChild(entry.fragment);
+      if (typeof enqueueCodeHighlight === 'function') {
+        els.chatList.querySelectorAll('pre code:not([data-hljs-done="1"])').forEach((el) => enqueueCodeHighlight(el));
+      }
+      if (entry.title && els.sessionTitle) els.sessionTitle.textContent = entry.title;
+      if (entry.workdir && els.headerDirLabel) els.headerDirLabel.textContent = basenamePath(entry.workdir);
+      els.chatScroll.scrollTop = entry.scrollTop || 0;
+      state.lastScrollTop = getDistanceFromBottom();
+      state.autoScroll = state.lastScrollTop < 90;
+      els.btnScrollBottom.classList.toggle('hidden', state.autoScroll);
+      return true;
+    }
+
+    function showSessionSwitchPlaceholder(title, workdir) {
+      if (typeof clearPendingCodeHighlights === 'function') clearPendingCodeHighlights();
+      state.items = [];
+      state.itemsById.clear();
+      state.totalItems = 0;
+      state.itemsOffset = 0;
+      state.hasMoreItems = false;
+      state.loadingOlderItems = false;
+      els.chatList
+        .querySelectorAll('[data-item-id], details.process-group, #load-older-bar, #session-switch-placeholder')
+        .forEach((el) => el.remove());
+      els.emptyState.classList.add('hidden');
+      if (title && els.sessionTitle) els.sessionTitle.textContent = title;
+      if (workdir && els.headerDirLabel) els.headerDirLabel.textContent = basenamePath(workdir);
+      const box = document.createElement('div');
+      box.id = 'session-switch-placeholder';
+      box.className = 'flex items-center justify-center py-12 text-xs text-slate-400 gap-2 select-none';
+      box.innerHTML =
+        '<span class="inline-block w-3.5 h-3.5 rounded-full border-2 border-slate-600 border-t-blue-400 animate-spin"></span><span>正在加载会话记录...</span>';
+      els.chatList.appendChild(box);
+    }
+
     function renderAllItems(items) {
+      if (typeof clearPendingCodeHighlights === 'function') clearPendingCodeHighlights();
       state.suppressAutoLoadUntil = Date.now() + 600;
       state.items = items || [];
       state.itemsById.clear();
-      els.chatList.querySelectorAll('[data-item-id], details.process-group, #load-older-bar').forEach((el) => el.remove());
+      els.chatList
+        .querySelectorAll('[data-item-id], details.process-group, #load-older-bar, #session-switch-placeholder')
+        .forEach((el) => el.remove());
 
       if (!state.items.length) {
         els.emptyState.classList.remove('hidden');

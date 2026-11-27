@@ -26,7 +26,7 @@ logger = config.logger
 class ACPSnapshotsMixin:
     """Snapshot serialization, item pagination/detail, status payload, and WS broadcast."""
 
-    SNAPSHOT_ITEM_LIMIT = 200
+    SNAPSHOT_ITEM_LIMIT = 60
 
     def _background_counts(self, exclude_sid: Optional[str] = None) -> Tuple[int, int]:
         bg_busy = 0

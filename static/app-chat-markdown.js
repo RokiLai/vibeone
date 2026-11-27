@@ -110,7 +110,51 @@
       });
     }
 
-    function renderMarkdownInto(container, markdownText) {
+    const _pendingCodeHighlights = [];
+    let _codeHighlightRaf = null;
+
+    function clearPendingCodeHighlights() {
+      _pendingCodeHighlights.length = 0;
+      if (_codeHighlightRaf !== null) {
+        if (typeof cancelAnimationFrame === 'function') cancelAnimationFrame(_codeHighlightRaf);
+        else clearTimeout(_codeHighlightRaf);
+        _codeHighlightRaf = null;
+      }
+    }
+
+    function _flushCodeHighlights() {
+      _codeHighlightRaf = null;
+      let budget = 4;
+      while (budget > 0 && _pendingCodeHighlights.length > 0) {
+        const codeEl = _pendingCodeHighlights.shift();
+        if (!codeEl || !codeEl.isConnected || codeEl.dataset.hljsDone === '1') continue;
+        try {
+          hljs.highlightElement(codeEl);
+          codeEl.dataset.hljsDone = '1';
+        } catch (_) {}
+        budget -= 1;
+      }
+      if (_pendingCodeHighlights.length > 0) {
+        const schedule = typeof requestAnimationFrame === 'function'
+          ? requestAnimationFrame
+          : (fn) => setTimeout(fn, 16);
+        _codeHighlightRaf = schedule(_flushCodeHighlights);
+      }
+    }
+
+    function enqueueCodeHighlight(codeEl) {
+      if (!codeEl || codeEl.dataset.hljsDone === '1') return;
+      _pendingCodeHighlights.push(codeEl);
+      if (_codeHighlightRaf === null) {
+        const schedule = typeof requestAnimationFrame === 'function'
+          ? requestAnimationFrame
+          : (fn) => setTimeout(fn, 16);
+        _codeHighlightRaf = schedule(_flushCodeHighlights);
+      }
+    }
+
+    function renderMarkdownInto(container, markdownText, opts = {}) {
+      const deferHighlight = Boolean(opts && opts.deferHighlight);
       const rawHtml = marked.parse(markdownText || '');
       const safeHtml = window.DOMPurify
         ? window.DOMPurify.sanitize(rawHtml, {
@@ -129,7 +173,14 @@
         if (codeEl) {
           const m = (codeEl.className || '').match(/language-([\w-]+)/);
           if (m) lang = m[1];
-          try { hljs.highlightElement(codeEl); } catch (_) {}
+          if (deferHighlight) {
+            enqueueCodeHighlight(codeEl);
+          } else {
+            try {
+              hljs.highlightElement(codeEl);
+              codeEl.dataset.hljsDone = '1';
+            } catch (_) {}
+          }
         }
 
         const rawCode = codeEl ? codeEl.textContent : pre.textContent;

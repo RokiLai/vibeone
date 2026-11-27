@@ -279,6 +279,7 @@ class ACPTurnsMixin:
         stop_reason = "end_turn"
         early_stop_msg = ""
         try:
+            await self.await_session_resume(sid)
             prompt_blocks = await self._build_prompt_blocks(prompt_text, images)
             res = await self._send_request(
                 "session/prompt",

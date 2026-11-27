@@ -106,6 +106,7 @@ class BaseEngineManager(ClientTransportMixin, EngineStateHelpersMixin):
         # Track latest remote updatedAt reported by session/list for external CLI sync
         self._remote_updated_at: Dict[str, float] = {}
         self._syncing_sessions: Set[str] = set()
+        self._pending_resume_tasks: Dict[str, asyncio.Task] = {}
         self._acp_session_list_cache: Optional[List[Dict[str, Any]]] = None
         self._acp_session_list_cache_time: float = 0.0
         self._acp_session_list_in_flight: Optional[asyncio.Future] = None
@@ -273,6 +274,84 @@ class BaseEngineManager(ClientTransportMixin, EngineStateHelpersMixin):
         if not self.session_id:
             return None
         return self._get_or_create_runtime(self.session_id)
+
+    def can_fast_switch_local(self, sid: str) -> bool:
+        clean = str(sid or "").strip()
+        if not clean:
+            return False
+        rt = self._runtimes.get(clean)
+        if rt and rt.loaded_in_acp:
+            return False
+        if rt and rt.items:
+            return True
+        stored = self.store.get_session(clean)
+        if not stored:
+            return False
+        return clean in self.store.get_sessions_with_items()
+
+    def schedule_background_resume(
+        self,
+        sid: str,
+        *,
+        workdir: Optional[str] = None,
+        title: Optional[str] = None,
+        current_sid: Optional[str] = None,
+        exclude_ws: Optional[WebSocket] = None,
+    ) -> asyncio.Task:
+        existing = self._pending_resume_tasks.get(sid)
+        if existing is not None and not existing.done():
+            return existing
+
+        async def _runner() -> None:
+            rt_before = self._runtimes.get(sid)
+            prev_count = len(rt_before.items) if rt_before else 0
+            try:
+                loaded_sid = await self.switch_session(
+                    sid,
+                    workdir=workdir,
+                    title=title,
+                    broadcast_all=False,
+                    current_sid=current_sid,
+                    exclude_ws=exclude_ws,
+                )
+                rt_after = self._runtimes.get(loaded_sid)
+                after_count = len(rt_after.items) if rt_after else 0
+                viewers = self._clients_for_session(loaded_sid) if hasattr(self, "_clients_for_session") else []
+                if viewers:
+                    if after_count != prev_count:
+                        await self.broadcast(
+                            {"type": "snapshot", "data": self.get_snapshot(sid=loaded_sid)},
+                            targets=viewers,
+                        )
+                    else:
+                        await self.broadcast(
+                            self._build_status_payload(loaded_sid),
+                            targets=viewers,
+                        )
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                logger.warning("Background session resume failed for %s: %s", sid[:8], exc)
+
+        task = asyncio.create_task(_runner(), name=f"bg-resume-{sid[:8]}")
+        self._pending_resume_tasks[sid] = task
+        task.add_done_callback(
+            lambda t, s=sid: self._pending_resume_tasks.pop(s, None)
+            if self._pending_resume_tasks.get(s) is t
+            else None
+        )
+        return task
+
+    async def await_session_resume(self, sid: Optional[str]) -> None:
+        clean = str(sid or "").strip()
+        if not clean:
+            return
+        task = self._pending_resume_tasks.get(clean)
+        if task is not None and not task.done():
+            try:
+                await asyncio.shield(task)
+            except Exception:
+                pass
 
     @property
     def is_busy(self) -> bool:
