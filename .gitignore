@@ -15,3 +15,4 @@ Caddyfile
 .restart_after_turn
 .cache/
 changes/
+logs/

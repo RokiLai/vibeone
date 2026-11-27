@@ -25,8 +25,11 @@
       return state.manualClose || !els.authOverlay.classList.contains('hidden');
     }
 
-    function forceReconnectWs() {
+    function forceReconnectWs(reason = 'manual') {
       if (isAuthRequired()) return;
+      if (typeof VibeTelemetry !== 'undefined') {
+        VibeTelemetry.track('ws_reconnect', { reason }, { cat: 'ws', level: 'warn' });
+      }
       clearTimeout(state.reconnectTimer);
       state.reconnectTimer = null;
       clearWsTimers();
@@ -57,14 +60,14 @@
       try {
         ws.send(JSON.stringify({ type: 'ping' }));
       } catch (_) {
-        forceReconnectWs();
+        forceReconnectWs('ping_send_failed');
         return;
       }
       if (state.pongTimer) clearTimeout(state.pongTimer);
       state.pongTimer = setTimeout(() => {
         state.pongTimer = null;
         if (state.ws === ws) {
-          forceReconnectWs();
+          forceReconnectWs('pong_timeout');
         }
       }, timeoutMs);
     }
@@ -85,12 +88,28 @@
     }
 
     function sendWs(obj) {
+      let payload = obj;
+      if (typeof VibeTelemetry !== 'undefined' && obj && typeof obj === 'object') {
+        const actionType = String(obj.type || '');
+        const traceId = obj.trace_id || VibeTelemetry.getActiveTraceId() || VibeTelemetry.startTrace(`ws:${actionType}`);
+        payload = { ...obj, trace_id: traceId };
+        if (actionType && actionType !== 'ping' && actionType !== 'client_visibility') {
+          const meta = { type: actionType };
+          if (obj.session_id) meta.target_sid = String(obj.session_id).slice(0, 64);
+          if (obj.profile) meta.target_profile = String(obj.profile).slice(0, 48);
+          if (typeof obj.text === 'string') meta.text_len = obj.text.length;
+          if (Array.isArray(obj.images) && obj.images.length) meta.images = obj.images.length;
+          if (obj.model_id) meta.model_id = String(obj.model_id).slice(0, 64);
+          if (obj.mode_id) meta.mode_id = String(obj.mode_id).slice(0, 48);
+          VibeTelemetry.track('ws_send', meta, { cat: 'behavior', level: 'info', traceId });
+        }
+      }
       if (state.ws && state.ws.readyState === WebSocket.OPEN) {
         try {
-          state.ws.send(JSON.stringify(obj));
+          state.ws.send(JSON.stringify(payload));
           return true;
         } catch (_) {
-          forceReconnectWs();
+          forceReconnectWs('send_error');
         }
       } else {
         ensureWsAlive(false);
@@ -144,10 +163,15 @@
       const targetSession = state.currentSessionId || saved.session_id;
       if (targetProfile) wsParams.set('profile', targetProfile);
       if (targetSession) wsParams.set('session', targetSession);
+      if (typeof VibeTelemetry !== 'undefined') {
+        wsParams.set('cid', VibeTelemetry.getClientId());
+        wsParams.set('page_id', VibeTelemetry.getPageId());
+      }
       const qs = wsParams.toString();
       const url = `${proto}//${location.host}/ws${qs ? `?${qs}` : ''}`;
       els.connDot.className = 'w-2 h-2 rounded-full bg-amber-400 animate-soft-pulse shrink-0';
 
+      const wsConnectStarted = typeof performance !== 'undefined' ? performance.now() : Date.now();
       const ws = new WebSocket(url);
       state.ws = ws;
 
@@ -155,7 +179,7 @@
       state.connectTimer = setTimeout(() => {
         state.connectTimer = null;
         if (state.ws === ws && ws.readyState === WebSocket.CONNECTING) {
-          forceReconnectWs();
+          forceReconnectWs('connect_timeout');
         }
       }, WS_CONNECT_TIMEOUT);
 
@@ -164,6 +188,10 @@
         clearWsTimers();
         state.reconnectDelay = 1000;
         state.lastWsMessageAt = Date.now();
+        if (typeof VibeTelemetry !== 'undefined') {
+          const openMs = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - wsConnectStarted;
+          VibeTelemetry.track('ws_open', { profile: targetProfile, sid: targetSession }, { cat: 'ws', durMs: openMs });
+        }
         try {
           ws.send(JSON.stringify({ type: 'client_visibility', visible: document.visibilityState === 'visible' }));
         } catch (_) {}
@@ -184,14 +212,21 @@
 
         let msg;
         try { msg = JSON.parse(ev.data); } catch (_) { return; }
+        if (typeof VibeTelemetry !== 'undefined' && msg.type !== 'pong') {
+          VibeTelemetry.noteWsMessage();
+        }
 
         if (msg.type === 'pong') {
           return;
         } else if (msg.type === 'snapshot') {
+          const snapStarted = typeof performance !== 'undefined' ? performance.now() : Date.now();
           const snap = msg.data || {};
           const prevSid = state.currentSessionId;
           const prevProfile = state.currentProfile;
           applyStatus(snap);
+          if (state.currentProfile && state.currentSessionId && state.lastSessionByProfile) {
+            state.lastSessionByProfile.set(state.currentProfile, state.currentSessionId);
+          }
           persistCurrentView();
           applyUsage(snap.usage);
           const nextItems = Array.isArray(snap.items) ? snap.items : [];
@@ -266,6 +301,15 @@
           renderPermissions();
           state.queuedPrompts = Array.isArray(snap.queued_prompts) ? snap.queued_prompts : [];
           renderQueueBar();
+          if (typeof VibeTelemetry !== 'undefined') {
+            const snapMs = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - snapStarted;
+            VibeTelemetry.recordSpan(
+              'ws_snapshot',
+              snapMs,
+              { items: nextItems.length, total: nextTotal, unchanged, same_session: Boolean(sameSession) },
+              { cat: 'perf', warnMs: 80, slowEvent: 'slow_render' }
+            );
+          }
           loadSidebarSessions();
           if (pushState.pendingDeepLinkSid || pushState.pendingDeepLinkProfile) {
             const targetSid = pushState.pendingDeepLinkSid;
@@ -325,6 +369,8 @@
           state.pendingPermissions.delete(msg.data.key);
           renderPermissions();
         } else if (msg.type === 'turn_end') {
+          if (typeof finishStreamingMarkdownRenders === 'function') finishStreamingMarkdownRenders();
+          else if (typeof flushStreamingMarkdownRenders === 'function') flushStreamingMarkdownRenders({ highlight: true });
           collapseCompletedProcessGroups();
           const sr = String(msg.data?.stopReason || '').toLowerCase();
           if (msg.data?.early_stop_message) {
@@ -350,6 +396,13 @@
         clearWsTimers();
         state.ws = null;
         els.connDot.className = 'w-2 h-2 rounded-full bg-rose-500 shrink-0';
+        if (typeof VibeTelemetry !== 'undefined') {
+          VibeTelemetry.track(
+            'ws_close',
+            { code: ev.code, reason: String(ev.reason || '').slice(0, 64), delay: state.reconnectDelay },
+            { cat: 'ws', level: state.manualClose ? 'info' : 'warn' }
+          );
+        }
         if (state.manualClose) {
           return;
         }

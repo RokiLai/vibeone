@@ -1,44 +1,19 @@
 // VibeOne Service Worker — Offline App Shell Cache & Web Push Notifications (iOS 16.4+ PWA / Android / Desktop)
 
-const CACHE_NAME = 'vibeone-shell-v2';
+const CACHE_NAME = 'vibeone-shell-v3';
 const PRECACHE_URLS = [
   '/',
   '/manifest.json?v=3',
   '/favicon.png?v=3',
   '/icon-192.png?v=3',
   '/apple-touch-icon.png?v=3',
-  '/vendor/tailwindcss.min.js',
+  '/vendor/tailwind.min.css',
   '/vendor/github-dark.min.css',
   '/vendor/purify.min.js',
   '/vendor/marked.min.js',
   '/vendor/highlight.min.js',
   '/static/app.css',
-  '/static/app-i18n-dict.js',
-  '/static/app-i18n.js',
-  '/static/app-bootstrap.js',
-  '/static/app-sidebar-gestures.js',
-  '/static/app-sidebar-search.js',
-  '/static/app-sidebar-actions.js',
-  '/static/app-sidebar.js',
-  '/static/app-chat-markdown.js',
-  '/static/app-chat-helpers.js',
-  '/static/app-chat-render.js',
-  '/static/app-chat.js',
-  '/static/app-pickers.js',
-  '/static/app-websocket.js',
-  '/static/app-auth.js',
-  '/static/app-composer-cards.js',
-  '/static/app-composer-slash.js',
-  '/static/app-composer.js',
-  '/static/app-picker-events.js',
-  '/static/app-profiles.js',
-  '/static/app-profile-login.js',
-  '/static/app-settings.js',
-  '/static/app-image-viewer.js',
-  '/static/app-git-diff-format.js',
-  '/static/app-git-diff.js',
-  '/static/app-file-tools.js',
-  '/static/app.js',
+  '/static/app.bundle.js',
 ];
 
 const CACHE_FIRST_PREFIXES = ['/vendor/'];
@@ -102,8 +77,25 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // App static assets (/static/*): Network-First so updates apply immediately online, cached offline
+  // App static assets (/static/*):
+  // - Versioned (?v=<hash>) assets use Cache-First for instant startup
+  // - Unversioned assets use Network-First with offline cache fallback
   if (pathname.startsWith('/static/')) {
+    if (url.searchParams.has('v')) {
+      event.respondWith(
+        caches.match(request).then((cached) => {
+          if (cached) return cached;
+          return fetch(request).then((resp) => {
+            if (resp && resp.ok) {
+              const copy = resp.clone();
+              caches.open(CACHE_NAME).then((cache) => cache.put(request, copy)).catch(() => {});
+            }
+            return resp;
+          });
+        })
+      );
+      return;
+    }
     event.respondWith(
       fetch(request)
         .then((resp) => {

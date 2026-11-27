@@ -182,8 +182,15 @@
       }
       entry.text += delta;
       entry.statusEl.textContent = '回答中...';
-      renderMarkdownInto(entry.bodyEl, entry.text);
-      scrollToBottom(false);
+      if (!entry.rafId) {
+        const schedule = typeof requestAnimationFrame === 'function' ? requestAnimationFrame : (fn) => setTimeout(fn, 16);
+        entry.rafId = schedule(() => {
+          entry.rafId = null;
+          if (!entry.card.isConnected || entry.done) return;
+          renderMarkdownInto(entry.bodyEl, entry.text, { skipHighlight: true });
+          scrollToBottom(false);
+        });
+      }
     }
 
     function finishBtwCard(btwId, finalText, errorMsg) {
@@ -194,6 +201,11 @@
         return;
       }
       entry.done = true;
+      if (entry.rafId) {
+        if (typeof cancelAnimationFrame === 'function') cancelAnimationFrame(entry.rafId);
+        else clearTimeout(entry.rafId);
+        entry.rafId = null;
+      }
       entry.dotEl.classList.remove('animate-pulse');
       if (errorMsg) {
         entry.dotEl.classList.remove('bg-amber-400');
@@ -207,7 +219,7 @@
         entry.dotEl.classList.add('bg-emerald-400');
         entry.statusEl.textContent = '已完成 · 可随时关闭';
         if (text) {
-          renderMarkdownInto(entry.bodyEl, text);
+          renderMarkdownInto(entry.bodyEl, text, { deferHighlight: true });
         } else {
           entry.bodyEl.innerHTML = '<div class="text-xs text-slate-400">(无回复内容)</div>';
         }

@@ -136,11 +136,86 @@
       return _profilesLoadInFlight;
     }
 
+    function _snapshotCurrentProfileCache() {
+      const prevProfile = state.currentProfile || '';
+      const prevSid = state.currentSessionId || '';
+      if (prevProfile && prevSid && state.lastSessionByProfile) {
+        state.lastSessionByProfile.set(prevProfile, prevSid);
+      }
+      if (prevProfile && Array.isArray(state.sessionsCache)) {
+        if (prevSid) {
+          const prevEntry = state.sessionsCache.find((x) => x && x.session_id === prevSid);
+          if (prevEntry) prevEntry.is_busy = Boolean(state.isBusy);
+        }
+        if (state.sessionsByProfile) {
+          state.sessionsByProfile.set(prevProfile, {
+            sessions: state.sessionsCache,
+            archived: state.archivedSessionsCache || [],
+          });
+        }
+      }
+      if (typeof cacheCurrentSessionView === 'function') {
+        cacheCurrentSessionView();
+      }
+    }
+
+    function _applyOptimisticProfileView(targetName, targetEmail) {
+      state.currentProfile = targetName;
+      state.currentProfileEmail = targetEmail || '';
+      const cachedList = state.sessionsByProfile ? state.sessionsByProfile.get(targetName) : null;
+      state.sessionsCache = cachedList ? cachedList.sessions : [];
+      state.archivedSessionsCache = cachedList ? cachedList.archived : [];
+      const cachedSid = state.lastSessionByProfile ? state.lastSessionByProfile.get(targetName) : '';
+      const restored = Boolean(
+        cachedSid &&
+        typeof restoreCachedSessionView === 'function' &&
+        restoreCachedSessionView(targetName, cachedSid)
+      );
+      if (restored) {
+        const cachedEntry = (state.sessionsCache || []).find((x) => x && x.session_id === cachedSid);
+        state.isBusy = Boolean(cachedEntry && cachedEntry.is_busy);
+      } else {
+        state.currentSessionId = '';
+        state.isBusy = false;
+        if (typeof showSessionSwitchPlaceholder === 'function') {
+          showSessionSwitchPlaceholder(targetName, '');
+        }
+      }
+      if (els.busyBadge) els.busyBadge.classList.toggle('hidden', !state.isBusy);
+      if (typeof updateComposerActionButton === 'function') updateComposerActionButton();
+      if (state.pendingPermissions && typeof state.pendingPermissions.clear === 'function') {
+        state.pendingPermissions.clear();
+      }
+      if (typeof renderPermissions === 'function') renderPermissions();
+      resetFullTextSearchState({ retrigger: true });
+      persistCurrentView();
+      renderProfileHeader();
+      renderProfileList();
+      renderSidebarSessions({ force: true });
+    }
+
     async function switchProfile(name, force = false) {
       if (!name || name === state.currentProfile || state.switchingProfile) return;
+      const targetInfo = (state.profiles || []).find((p) => p.name === name);
+      const canHotWsSwitch = Boolean(
+        !force &&
+        targetInfo &&
+        targetInfo.warm &&
+        state.ws &&
+        state.ws.readyState === WebSocket.OPEN
+      );
+      if (canHotWsSwitch) {
+        _snapshotCurrentProfileCache();
+        _applyOptimisticProfileView(name, targetInfo.email || '');
+        sendWs({ type: 'switch_profile', profile: name });
+        loadSidebarSessions(true);
+        loadProfiles();
+        showToast(`已切换账号: ${name}`);
+        return;
+      }
+
       state.switchingProfile = name;
       renderProfileList();
-      const targetInfo = (state.profiles || []).find((p) => p.name === name);
       if (!targetInfo || !targetInfo.warm) {
         showToast(`首次启动账号 ${name}，请稍候...`);
       }
@@ -153,14 +228,15 @@
         });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
-        state.currentProfile = data.profile || name;
-        state.currentProfileEmail = data.email || '';
-        state.currentSessionId = data.session_id || '';
+        _snapshotCurrentProfileCache();
+        const nextProfile = data.profile || name;
+        if (data.session_id && state.lastSessionByProfile) {
+          state.lastSessionByProfile.set(nextProfile, data.session_id);
+        }
         state.switchingProfile = '';
-        resetFullTextSearchState({ retrigger: true });
-        persistCurrentView();
-        renderProfileHeader();
+        _applyOptimisticProfileView(nextProfile, data.email || '');
         sendWs({ type: 'switch_profile', profile: state.currentProfile });
+        loadSidebarSessions(true);
         await loadProfiles();
         showToast(`已切换账号: ${state.currentProfile}`);
       } catch (err) {

@@ -176,12 +176,16 @@
     }
 
 
+    let _lastComposerBtnMode = '';
     function updateComposerActionButton() {
       const hasDraft =
         els.promptInput.value.trim().length > 0 ||
         state.uploadedImages.length > 0 ||
         Boolean(state.quotedReply && state.quotedReply.excerpt);
       const showStop = state.isBusy && !hasDraft;
+      const mode = showStop ? 'stop' : state.isBusy ? 'queue' : 'send';
+      if (mode === _lastComposerBtnMode) return;
+      _lastComposerBtnMode = mode;
       if (showStop) {
         els.btnSend.dataset.action = 'stop';
         els.btnSend.title = '中断当前任务';

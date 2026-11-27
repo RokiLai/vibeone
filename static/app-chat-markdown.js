@@ -153,8 +153,15 @@
       }
     }
 
+    function highlightUnmarkedCodeIn(root) {
+      const target = root || els.chatList;
+      if (!target || typeof target.querySelectorAll !== 'function') return;
+      target.querySelectorAll('pre code:not([data-hljs-done="1"])').forEach((el) => enqueueCodeHighlight(el));
+    }
+
     function renderMarkdownInto(container, markdownText, opts = {}) {
       const deferHighlight = Boolean(opts && opts.deferHighlight);
+      const skipHighlight = Boolean(opts && opts.skipHighlight);
       const rawHtml = marked.parse(markdownText || '');
       const safeHtml = window.DOMPurify
         ? window.DOMPurify.sanitize(rawHtml, {
@@ -173,7 +180,9 @@
         if (codeEl) {
           const m = (codeEl.className || '').match(/language-([\w-]+)/);
           if (m) lang = m[1];
-          if (deferHighlight) {
+          if (skipHighlight) {
+            // Streaming path: defer syntax highlighting until stream settles or turn_end
+          } else if (deferHighlight) {
             enqueueCodeHighlight(codeEl);
           } else {
             try {
@@ -259,13 +268,20 @@
       return null;
     }
 
-    els.chatScroll.addEventListener('scroll', () => {
+    let _chatScrollRaf = null;
+    let _lastNearBottom = null;
+
+    function _handleChatScrollFrame() {
+      _chatScrollRaf = null;
       const distBottom = getDistanceFromBottom();
       const scrollingUp = distBottom > state.lastScrollTop + 2;
       state.lastScrollTop = distBottom;
       const near = distBottom < 90;
       state.autoScroll = near;
-      els.btnScrollBottom.classList.toggle('hidden', near);
+      if (near !== _lastNearBottom) {
+        _lastNearBottom = near;
+        els.btnScrollBottom.classList.toggle('hidden', near);
+      }
       const now = Date.now();
       const distTop = getDistanceFromTop();
       const prefetchThreshold = Math.max(700, Math.round(els.chatScroll.clientHeight * 1.1));
@@ -280,10 +296,22 @@
       ) {
         loadOlderItems();
       }
-    });
+    }
+
+    els.chatScroll.addEventListener(
+      'scroll',
+      () => {
+        if (_chatScrollRaf !== null) return;
+        const schedule =
+          typeof requestAnimationFrame === 'function' ? requestAnimationFrame : (fn) => setTimeout(fn, 16);
+        _chatScrollRaf = schedule(_handleChatScrollFrame);
+      },
+      { passive: true }
+    );
 
     els.btnScrollBottom.addEventListener('click', () => {
       state.autoScroll = true;
+      _lastNearBottom = true;
       scrollToBottom(true);
       els.btnScrollBottom.classList.add('hidden');
     });

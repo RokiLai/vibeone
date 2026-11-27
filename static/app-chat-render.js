@@ -1,3 +1,297 @@
+    const _streamRenderJobs = new Map();
+    const STREAM_SMOOTH_MAX_LEN = 12000;
+
+    function _nextSafeSliceLen(text, targetLen) {
+      if (targetLen >= text.length) return text.length;
+      const code = text.charCodeAt(targetLen - 1);
+      if (code >= 0xd800 && code <= 0xdbff && targetLen < text.length) {
+        return targetLen + 1;
+      }
+      return targetLen;
+    }
+
+    function clearStreamingMarkdownRenders() {
+      _streamRenderJobs.forEach((job) => {
+        if (job.timer) clearTimeout(job.timer);
+        if (job.finalizeTimer) clearTimeout(job.finalizeTimer);
+        if (job.rafId !== null) {
+          if (typeof cancelAnimationFrame === 'function') cancelAnimationFrame(job.rafId);
+          else clearTimeout(job.rafId);
+        }
+      });
+      _streamRenderJobs.clear();
+    }
+
+    function flushStreamingMarkdownRenders(opts = {}) {
+      const doHighlight = opts.highlight !== false;
+      _streamRenderJobs.forEach((job, itemId) => {
+        if (job.timer) {
+          clearTimeout(job.timer);
+          job.timer = null;
+        }
+        if (job.finalizeTimer) {
+          clearTimeout(job.finalizeTimer);
+          job.finalizeTimer = null;
+        }
+        if (job.rafId !== null) {
+          if (typeof cancelAnimationFrame === 'function') cancelAnimationFrame(job.rafId);
+          else clearTimeout(job.rafId);
+          job.rafId = null;
+        }
+        if (!job.body || !job.body.isConnected) return;
+        const cur = state.itemsById.get(itemId) || job.item;
+        const fullText = String(cur?.text || '');
+        if (job.dirty || job.displayedLen < fullText.length) {
+          job.dirty = false;
+          job.displayedLen = fullText.length;
+          renderMarkdownInto(job.body, fullText, { deferHighlight: doHighlight, skipHighlight: !doHighlight });
+          scrollToBottom();
+        } else if (doHighlight && typeof highlightUnmarkedCodeIn === 'function') {
+          highlightUnmarkedCodeIn(job.body);
+        }
+      });
+      _streamRenderJobs.clear();
+    }
+
+    function finishStreamingMarkdownRenders() {
+      _streamRenderJobs.forEach((job, itemId) => {
+        job.turnEnded = true;
+        if (job.finalizeTimer) {
+          clearTimeout(job.finalizeTimer);
+          job.finalizeTimer = null;
+        }
+        if (!job.body || !job.body.isConnected) {
+          _streamRenderJobs.delete(itemId);
+          return;
+        }
+        const cur = state.itemsById.get(itemId) || job.item;
+        const fullText = String(cur?.text || '');
+        if (job.displayedLen >= fullText.length && !job.dirty) {
+          if (typeof highlightUnmarkedCodeIn === 'function') highlightUnmarkedCodeIn(job.body);
+          _streamRenderJobs.delete(itemId);
+        }
+      });
+    }
+
+    function scheduleStreamingMarkdownRender(item, body) {
+      if (!item || !body) return;
+      const itemId = item.id;
+      const initialText = String(item.text || '');
+      let job = _streamRenderJobs.get(itemId);
+      if (!job) {
+        job = {
+          item,
+          body,
+          dirty: false,
+          turnEnded: false,
+          displayedLen: initialText.length > 400 ? initialText.length : 0,
+          charBudget: 0,
+          lastTickAt: 0,
+          lastRenderAt: 0,
+          timer: null,
+          rafId: null,
+          finalizeTimer: null,
+        };
+        _streamRenderJobs.set(itemId, job);
+      }
+      job.item = item;
+      job.body = body;
+      job.dirty = true;
+
+      if (job.finalizeTimer) clearTimeout(job.finalizeTimer);
+      job.finalizeTimer = setTimeout(() => {
+        job.finalizeTimer = null;
+        if (!job.body || !job.body.isConnected) {
+          _streamRenderJobs.delete(itemId);
+          return;
+        }
+        const cur = state.itemsById.get(itemId) || job.item;
+        const fullText = String(cur?.text || '');
+        if (job.displayedLen < fullText.length && job.rafId !== null) {
+          job.turnEnded = true;
+          return;
+        }
+        if (job.dirty || job.displayedLen < fullText.length) {
+          if (job.timer) { clearTimeout(job.timer); job.timer = null; }
+          if (job.rafId !== null) {
+            if (typeof cancelAnimationFrame === 'function') cancelAnimationFrame(job.rafId);
+            else clearTimeout(job.rafId);
+            job.rafId = null;
+          }
+          job.dirty = false;
+          job.displayedLen = fullText.length;
+          renderMarkdownInto(job.body, fullText, { deferHighlight: true });
+          scrollToBottom();
+        } else if (typeof highlightUnmarkedCodeIn === 'function') {
+          highlightUnmarkedCodeIn(job.body);
+        }
+        _streamRenderJobs.delete(itemId);
+      }, 900);
+
+      if (job.timer || job.rafId !== null) return;
+
+      const scheduleRaf = () => {
+        if (typeof requestAnimationFrame === 'function') {
+          job.rafId = requestAnimationFrame(runFrame);
+        } else {
+          job.rafId = setTimeout(runFrame, 16);
+        }
+      };
+
+      const runFrame = () => {
+        job.rafId = null;
+        if (!job.body || !job.body.isConnected) {
+          _streamRenderJobs.delete(itemId);
+          return;
+        }
+        const cur = state.itemsById.get(itemId) || job.item;
+        const fullText = String(cur?.text || '');
+        if (!job.dirty && job.displayedLen >= fullText.length) {
+          if (job.turnEnded) {
+            if (typeof highlightUnmarkedCodeIn === 'function') highlightUnmarkedCodeIn(job.body);
+            _streamRenderJobs.delete(itemId);
+          }
+          return;
+        }
+
+        const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+        const rawDt = job.lastTickAt ? now - job.lastTickAt : 16;
+        const dtMs = rawDt > 0 ? Math.min(64, rawDt) : 16;
+        job.lastTickAt = now;
+
+        if (fullText.length > STREAM_SMOOTH_MAX_LEN) {
+          const elapsed = now - job.lastRenderAt;
+          if (job.lastRenderAt && elapsed < 36) {
+            job.timer = setTimeout(() => {
+              job.timer = null;
+              scheduleRaf();
+            }, 36 - elapsed);
+            return;
+          }
+          job.displayedLen = fullText.length;
+        } else if (job.displayedLen < fullText.length) {
+          const backlog = fullText.length - job.displayedLen;
+          // Time-based reading pace (consistent across 60Hz and 120Hz ProMotion displays)
+          let cps = 55;
+          if (backlog > 2500) cps = Math.min(260, 140 + (backlog - 2500) * 0.05);
+          else if (backlog > 600) cps = Math.min(140, 55 + (backlog - 600) * 0.05);
+          job.charBudget += (dtMs / 1000) * cps;
+          const step = Math.floor(job.charBudget);
+          if (step < 1) {
+            scheduleRaf();
+            return;
+          }
+          job.charBudget -= step;
+          job.displayedLen = _nextSafeSliceLen(fullText, Math.min(fullText.length, job.displayedLen + step));
+        } else {
+          job.displayedLen = fullText.length;
+        }
+
+        job.dirty = false;
+        const reachedEnd = job.displayedLen >= fullText.length;
+        renderMarkdownInto(job.body, fullText.slice(0, job.displayedLen), {
+          skipHighlight: !(reachedEnd && job.turnEnded),
+          deferHighlight: Boolean(reachedEnd && job.turnEnded),
+        });
+        job.lastRenderAt = typeof performance !== 'undefined' ? performance.now() : Date.now();
+        scrollToBottom();
+
+        if (!reachedEnd) {
+          scheduleRaf();
+        } else if (job.turnEnded) {
+          _streamRenderJobs.delete(itemId);
+        }
+      };
+
+      scheduleRaf();
+    }
+
+    let _capturedQuoteSelection = '';
+    let _capturedQuoteItemId = '';
+    if (els.chatList && typeof els.chatList.addEventListener === 'function') {
+      els.chatList.addEventListener('pointerdown', (e) => {
+        const quoteBtn = e.target && e.target.closest ? e.target.closest('.btn-msg-quote') : null;
+        if (!quoteBtn) return;
+        _capturedQuoteSelection = '';
+        _capturedQuoteItemId = '';
+        const node = quoteBtn.closest('[data-item-id]');
+        if (!node) return;
+        const sel = window.getSelection ? window.getSelection() : null;
+        if (!sel || sel.isCollapsed) return;
+        const selectedText = String(sel).trim();
+        if (!selectedText) return;
+        const anchorInNode = sel.anchorNode && node.contains(sel.anchorNode);
+        const focusInNode = sel.focusNode && node.contains(sel.focusNode);
+        if (anchorInNode || focusInNode) {
+          _capturedQuoteSelection = selectedText;
+          _capturedQuoteItemId = node.dataset.itemId || '';
+        }
+      });
+
+      els.chatList.addEventListener('click', (e) => {
+        const target = e.target;
+        if (!target || !target.closest) return;
+
+        const imgBtn = target.closest('[data-img-idx]');
+        if (imgBtn && els.chatList.contains(imgBtn)) {
+          const node = imgBtn.closest('[data-item-id]');
+          const cur = node ? state.itemsById.get(node.dataset.itemId) : null;
+          const urls = (cur?.images || []).map((im) => im.url).filter(Boolean);
+          if (urls.length) {
+            e.preventDefault();
+            e.stopPropagation();
+            openImageModal(urls, Number(imgBtn.dataset.imgIdx) || 0);
+          }
+          return;
+        }
+
+        const quoteCard = target.closest('.user-quote-card.is-expandable');
+        if (quoteCard && els.chatList.contains(quoteCard)) {
+          const sel = window.getSelection ? String(window.getSelection()).trim() : '';
+          if (!sel) quoteCard.classList.toggle('is-expanded');
+          return;
+        }
+
+        const actionBtn = target.closest('.btn-msg-copy, .btn-msg-edit, .btn-msg-retry, .btn-msg-quote, .btn-continue-turn');
+        if (!actionBtn || !els.chatList.contains(actionBtn)) return;
+        if (actionBtn.classList.contains('btn-continue-turn')) {
+          sendWs({ type: 'prompt', text: '继续', display_text: '继续', images: [] });
+          return;
+        }
+        const node = actionBtn.closest('[data-item-id]');
+        if (!node) return;
+        const itemId = node.dataset.itemId || '';
+        const itemType = node.dataset.itemType || '';
+        const cur = state.itemsById.get(itemId);
+        if (actionBtn.classList.contains('btn-msg-copy')) {
+          copyText(cur?.text || '', actionBtn);
+        } else if (actionBtn.classList.contains('btn-msg-edit')) {
+          editUserItemInComposer(cur);
+        } else if (actionBtn.classList.contains('btn-msg-retry')) {
+          if (itemType === 'assistant') {
+            resendUserItem(findPrecedingUserItem(node));
+          } else {
+            resendUserItem(cur);
+          }
+        } else if (actionBtn.classList.contains('btn-msg-quote')) {
+          if (_capturedQuoteSelection && _capturedQuoteItemId === itemId) {
+            quoteTextInComposer(_capturedQuoteSelection, {
+              itemId,
+              label: '引用选中内容',
+              maxLen: 260,
+            });
+          } else {
+            quoteTextInComposer(cur?.text || '', {
+              itemId,
+              label: '引用回复',
+            });
+          }
+          _capturedQuoteSelection = '';
+          _capturedQuoteItemId = '';
+        }
+      });
+    }
+
     function createOrUpdateItemDom(item, opts = {}) {
       const bulk = Boolean(opts.bulk);
       const fresh = Boolean(opts.fresh);
@@ -17,7 +311,7 @@
         const imgs = imgList
           .map(
             (im, idx) =>
-              `<button type="button" data-img-idx="${idx}" class="block rounded-lg overflow-hidden active:opacity-80 focus:outline-none"><img src="${escapeHtml(im.url)}" alt="image" class="max-h-40 rounded-lg border border-blue-400/30 object-cover" /></button>`
+              `<button type="button" data-img-idx="${idx}" class="block rounded-lg overflow-hidden active:opacity-80 focus:outline-none"><img src="${escapeHtml(im.url)}" alt="image" loading="lazy" decoding="async" class="max-h-40 rounded-lg border border-blue-400/30 object-cover" /></button>`
           )
           .join('');
         const textTrimmed = String(item.text || '').trim();
@@ -50,43 +344,6 @@
             <button type="button" class="btn-msg-edit ${MSG_ACTION_BTN_CLS}" title="回填到输入框编辑">编辑</button>
             <button type="button" class="btn-msg-retry ${MSG_ACTION_BTN_CLS}" title="重新发送">重试</button>
           </div>`;
-        const quoteCard = node.querySelector('.user-quote-card.is-expandable');
-        if (quoteCard) {
-          quoteCard.addEventListener('click', () => {
-            const sel = window.getSelection ? String(window.getSelection()).trim() : '';
-            if (sel) return;
-            quoteCard.classList.toggle('is-expanded');
-          });
-        }
-        if (imgList.length) {
-          const urls = imgList.map((im) => im.url).filter(Boolean);
-          node.querySelectorAll('[data-img-idx]').forEach((btn) => {
-            btn.addEventListener('click', (e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              openImageModal(urls, Number(btn.dataset.imgIdx) || 0);
-            });
-          });
-        }
-        const copyBtn = node.querySelector('.btn-msg-copy');
-        if (copyBtn) {
-          copyBtn.addEventListener('click', () => {
-            const cur = state.itemsById.get(item.id) || item;
-            copyText(cur.text || '', copyBtn);
-          });
-        }
-        const editBtn = node.querySelector('.btn-msg-edit');
-        if (editBtn) {
-          editBtn.addEventListener('click', () => {
-            editUserItemInComposer(state.itemsById.get(item.id) || item);
-          });
-        }
-        const retryBtn = node.querySelector('.btn-msg-retry');
-        if (retryBtn) {
-          retryBtn.addEventListener('click', () => {
-            resendUserItem(state.itemsById.get(item.id) || item);
-          });
-        }
       } else if (item.type === 'assistant') {
         if (!node) {
           node = document.createElement('div');
@@ -104,59 +361,13 @@
                 <button type="button" class="btn-msg-retry ${MSG_ACTION_BTN_CLS}" title="重新生成此回复">重试</button>
               </div>
             </div>`;
-          const copyBtn = node.querySelector('.btn-msg-copy');
-          copyBtn.addEventListener('click', () => {
-            const cur = state.itemsById.get(item.id) || item;
-            copyText(cur.text || '', copyBtn);
-          });
-          let capturedSelection = '';
-          const quoteBtn = node.querySelector('.btn-msg-quote');
-          quoteBtn.addEventListener('pointerdown', () => {
-            capturedSelection = '';
-            const sel = window.getSelection ? window.getSelection() : null;
-            if (!sel || sel.isCollapsed) return;
-            const selectedText = String(sel).trim();
-            if (!selectedText) return;
-            const anchorInNode = sel.anchorNode && node.contains(sel.anchorNode);
-            const focusInNode = sel.focusNode && node.contains(sel.focusNode);
-            if (anchorInNode || focusInNode) {
-              capturedSelection = selectedText;
-            }
-          });
-          quoteBtn.addEventListener('click', () => {
-            const cur = state.itemsById.get(item.id) || item;
-            if (capturedSelection) {
-              quoteTextInComposer(capturedSelection, {
-                itemId: item.id,
-                label: '引用选中内容',
-                maxLen: 260,
-              });
-              capturedSelection = '';
-            } else {
-              quoteTextInComposer(cur.text || '', {
-                itemId: item.id,
-                label: '引用回复',
-              });
-            }
-          });
-          node.querySelector('.btn-msg-retry').addEventListener('click', () => {
-            const prevUser = findPrecedingUserItem(node);
-            resendUserItem(prevUser);
-          });
           container.appendChild(node);
         }
         const body = node.querySelector('.md-body');
         if (bulk) {
           renderMarkdownInto(body, item.text || '', { deferHighlight: true });
         } else {
-          clearTimeout(state.renderTimers.get(item.id));
-          state.renderTimers.set(
-            item.id,
-            setTimeout(() => {
-              renderMarkdownInto(body, item.text || '');
-              scrollToBottom();
-            }, 35)
-          );
+          scheduleStreamingMarkdownRender(item, body);
         }
       } else if (item.type === 'thought') {
         let group = node ? node.closest('details.process-group') : null;
@@ -240,9 +451,6 @@
             <span class="min-w-0 leading-relaxed">⚠ ${escapeHtml(item.text || '')}</span>
             <button type="button" class="btn-continue-turn shrink-0 px-2.5 py-1 rounded-lg bg-amber-500/20 hover:bg-amber-500/35 border border-amber-400/40 text-amber-100 font-medium active:scale-95 transition">继续</button>
           `;
-          node.querySelector('.btn-continue-turn').addEventListener('click', () => {
-            sendWs({ type: 'prompt', text: '继续', display_text: '继续', images: [] });
-          });
         } else {
           node.textContent = `错误: ${item.text || ''}`;
         }

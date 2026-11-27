@@ -1,14 +1,18 @@
 """WebSocket endpoint for real-time chat, streaming, and session control."""
 
 import json
+import logging
+import time
 from pathlib import Path
 from typing import Any, Callable, Dict, Tuple
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from .. import config
+from .telemetry import sanitize_trace_token
 
 logger = config.logger
+telemetry_logger = logging.getLogger("vibeone.telemetry")
 
 
 def build_ws_router(
@@ -46,6 +50,8 @@ def build_ws_router(
         try:
             init_profile = str(ws.query_params.get("profile") or "").strip()
             init_session = str(ws.query_params.get("session") or "").strip() or None
+            client_cid = sanitize_trace_token(ws.query_params.get("cid")) or "-"
+            client_page = sanitize_trace_token(ws.query_params.get("page_id")) or "-"
             mgr = manager.active
             if init_profile and init_profile != mgr.current_profile:
                 try:
@@ -81,6 +87,8 @@ def build_ws_router(
                     continue
 
                 action = msg.get("type")
+                trace_id = sanitize_trace_token(msg.get("trace_id")) or "-"
+                action_started = time.perf_counter()
                 mgr, cur_sid = _current_view()
                 if action == "ping":
                     manager.clients.add(ws)
@@ -114,6 +122,15 @@ def build_ws_router(
                             manager.set_client_view(ws, target_mgr.current_profile, target_sid)
                             await _send_json({"type": "snapshot", "data": target_mgr.get_snapshot(sid=target_sid)})
                         except Exception as exc:
+                            telemetry_logger.warning(
+                                "ws_action_error action=%s trace=%s cid=%s page=%s sid=%s err=%s",
+                                action,
+                                trace_id,
+                                client_cid,
+                                client_page,
+                                cur_sid or "-",
+                                exc,
+                            )
                             await _send_json({"type": "toast", "data": {"level": "error", "message": str(exc)}})
                 elif action == "prompt":
                     prompt_text = str(msg.get("text", "")).strip()
@@ -231,6 +248,15 @@ def build_ws_router(
                                 manager.set_client_view(ws, mgr.current_profile, loaded_sid)
                                 await _send_json({"type": "snapshot", "data": mgr.get_snapshot(sid=loaded_sid)})
                         except Exception as exc:
+                            telemetry_logger.warning(
+                                "ws_action_error action=%s trace=%s cid=%s page=%s sid=%s err=%s",
+                                action,
+                                trace_id,
+                                client_cid,
+                                client_page,
+                                cur_sid or "-",
+                                exc,
+                            )
                             await _send_json({"type": "toast", "data": {"level": "error", "message": str(exc)}})
                 elif action == "remove_session":
                     sid = str(msg.get("session_id", "")).strip()
@@ -239,6 +265,15 @@ def build_ws_router(
                             await mgr.remove_session(sid)
                             await _send_json({"type": "toast", "data": {"level": "info", "message": "已从侧边栏移除该会话"}})
                         except Exception as exc:
+                            telemetry_logger.warning(
+                                "ws_action_error action=%s trace=%s cid=%s page=%s sid=%s err=%s",
+                                action,
+                                trace_id,
+                                client_cid,
+                                client_page,
+                                cur_sid or "-",
+                                exc,
+                            )
                             await _send_json({"type": "toast", "data": {"level": "error", "message": str(exc)}})
                 elif action == "remove_workdir":
                     workdir = str(msg.get("workdir", "")).strip()
@@ -253,6 +288,15 @@ def build_ws_router(
                                 }
                             )
                         except Exception as exc:
+                            telemetry_logger.warning(
+                                "ws_action_error action=%s trace=%s cid=%s page=%s sid=%s err=%s",
+                                action,
+                                trace_id,
+                                client_cid,
+                                client_page,
+                                cur_sid or "-",
+                                exc,
+                            )
                             await _send_json({"type": "toast", "data": {"level": "error", "message": str(exc)}})
                 elif action == "set_mode":
                     mode_id = str(msg.get("mode_id", "")).strip()
@@ -260,6 +304,15 @@ def build_ws_router(
                         try:
                             await mgr.set_mode(mode_id, sid=cur_sid)
                         except Exception as exc:
+                            telemetry_logger.warning(
+                                "ws_action_error action=%s trace=%s cid=%s page=%s sid=%s err=%s",
+                                action,
+                                trace_id,
+                                client_cid,
+                                client_page,
+                                cur_sid or "-",
+                                exc,
+                            )
                             await _send_json({"type": "toast", "data": {"level": "error", "message": str(exc)}})
                 elif action == "set_model":
                     model_id = str(msg.get("model_id", "")).strip()
@@ -269,7 +322,28 @@ def build_ws_router(
                             label = mgr.get_model_display_name(model_id)
                             await _send_json({"type": "toast", "data": {"level": "info", "message": f"已切换模型: {label}"}})
                         except Exception as exc:
+                            telemetry_logger.warning(
+                                "ws_action_error action=%s trace=%s cid=%s page=%s sid=%s err=%s",
+                                action,
+                                trace_id,
+                                client_cid,
+                                client_page,
+                                cur_sid or "-",
+                                exc,
+                            )
                             await _send_json({"type": "toast", "data": {"level": "error", "message": str(exc)}})
+                if action != "ping":
+                    dur_ms = (time.perf_counter() - action_started) * 1000.0
+                    if dur_ms >= 400.0:
+                        telemetry_logger.info(
+                            "ws_action_slow action=%s trace=%s cid=%s page=%s sid=%s dur_ms=%.1f",
+                            action,
+                            trace_id,
+                            client_cid,
+                            client_page,
+                            cur_sid or "-",
+                            dur_ms,
+                        )
         except WebSocketDisconnect:
             pass
         finally:

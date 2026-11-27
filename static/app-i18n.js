@@ -252,6 +252,7 @@
         } catch (_) {}
         syncLangButtons();
         applyI18nToTree(document.body);
+        syncObserverState();
       }
 
       // Wrap native confirm/prompt dialogs so dynamic prompts are translated too
@@ -315,18 +316,31 @@
         }
       });
 
+      let _observing = false;
+      function syncObserverState() {
+        if (currentLang === 'en') {
+          if (!_observing && document.body) {
+            observer.observe(document.body, {
+              childList: true,
+              subtree: true,
+              characterData: true,
+              attributes: true,
+              attributeFilter: ATTRS,
+            });
+            _observing = true;
+          }
+        } else if (_observing) {
+          observer.disconnect();
+          _observing = false;
+        }
+      }
+
       function startI18n() {
         syncLangButtons();
         if (currentLang === 'en') {
           applyI18nToTree(document.body);
         }
-        observer.observe(document.body, {
-          childList: true,
-          subtree: true,
-          characterData: true,
-          attributes: true,
-          attributeFilter: ATTRS,
-        });
+        syncObserverState();
       }
 
       if (document.readyState === 'loading') {

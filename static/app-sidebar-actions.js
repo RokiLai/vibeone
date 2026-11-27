@@ -396,6 +396,7 @@
           _sessionsLastLoadedProfile = reqProfile;
           state.sessionsCache = data.sessions || [];
           state.archivedSessionsCache = data.archived_sessions || [];
+          if (reqProfile && state.sessionsByProfile) state.sessionsByProfile.set(reqProfile, { sessions: state.sessionsCache, archived: state.archivedSessionsCache });
           renderSidebarSessions();
         } catch (_) {
         } finally {

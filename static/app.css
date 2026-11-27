@@ -39,6 +39,13 @@
       flex: 0 0 auto;
       margin-bottom: auto;
     }
+    @supports (content-visibility: auto) {
+      #chat-list > [data-item-id],
+      #chat-list > details.process-group {
+        content-visibility: auto;
+        contain-intrinsic-size: auto 100px;
+      }
+    }
     .safe-top {
       padding-top: max(0.5rem, env(safe-area-inset-top));
     }

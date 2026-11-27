@@ -32,6 +32,7 @@
       if (state.loadingOlderItems || !state.hasMoreItems || !state.currentSessionId || !state.items.length) {
         return;
       }
+      if (typeof flushProgressiveHydration === 'function') flushProgressiveHydration();
       const targetSid = state.currentSessionId;
       const firstItem = state.items[0];
       state.loadingOlderItems = true;
@@ -98,6 +99,40 @@
 
     const SESSION_VIEW_CACHE_MAX = 8;
     const _sessionViewCache = new Map();
+    const PROGRESSIVE_INITIAL_TAIL = 20, PROGRESSIVE_THRESHOLD = 28, PROGRESSIVE_CHUNK_SIZE = 24;
+    let _progressiveHydrateToken = 0, _progressiveHydrateRaf = null, _progressiveFlushFn = null;
+
+    function _clearProgressiveRaf() {
+      if (_progressiveHydrateRaf === null) return;
+      (typeof cancelAnimationFrame === 'function' ? cancelAnimationFrame : clearTimeout)(_progressiveHydrateRaf);
+      _progressiveHydrateRaf = null;
+    }
+
+    function cancelProgressiveHydration() {
+      _progressiveHydrateToken += 1;
+      _progressiveFlushFn = null;
+      _clearProgressiveRaf();
+    }
+
+    function flushProgressiveHydration() {
+      const fn = _progressiveFlushFn;
+      _progressiveFlushFn = null;
+      if (typeof fn === 'function') fn();
+    }
+
+    function _chatListFirstMessageAnchor() {
+      const bar = document.getElementById('load-older-bar');
+      if (bar && bar.parentNode === els.chatList) return bar.nextSibling;
+      if (els.emptyState && els.emptyState.parentNode === els.chatList) return els.emptyState.nextSibling;
+      return els.chatList.firstChild;
+    }
+
+    function _findSafeSplitIndex(list, targetIdx) {
+      const isProc = (it) => Boolean(it && (it.type === 'thought' || it.type === 'tool'));
+      let idx = Math.max(0, Math.min(list.length, targetIdx));
+      while (idx > 0 && idx < list.length && isProc(list[idx]) && isProc(list[idx - 1])) idx -= 1;
+      return idx;
+    }
 
     function _sessionCacheKey(profile, sessionId) {
       return `${String(profile || '')}::${String(sessionId || '')}`;
@@ -106,6 +141,7 @@
     function cacheCurrentSessionView() {
       const sid = state.currentSessionId;
       if (!sid || !state.items.length) return;
+      if (_progressiveHydrateRaf !== null) return;
       if (document.getElementById('session-switch-placeholder')) return;
       const nodes = Array.from(
         els.chatList.querySelectorAll(':scope > [data-item-id], :scope > details.process-group, :scope > #load-older-bar')
@@ -137,7 +173,10 @@
       const key = _sessionCacheKey(profile, sessionId);
       const entry = _sessionViewCache.get(key);
       if (!entry) return false;
+      const t0 = typeof performance !== 'undefined' ? performance.now() : Date.now();
       _sessionViewCache.delete(key);
+      cancelProgressiveHydration();
+      if (typeof clearStreamingMarkdownRenders === 'function') clearStreamingMarkdownRenders();
       if (typeof clearPendingCodeHighlights === 'function') clearPendingCodeHighlights();
       state.suppressAutoLoadUntil = Date.now() + 500;
       els.chatList
@@ -163,10 +202,16 @@
       state.lastScrollTop = getDistanceFromBottom();
       state.autoScroll = state.lastScrollTop < 90;
       els.btnScrollBottom.classList.toggle('hidden', state.autoScroll);
+      if (typeof VibeTelemetry !== 'undefined') {
+        const durMs = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - t0;
+        VibeTelemetry.recordSpan('session_cache_hit', durMs, { items: state.items.length }, { cat: 'perf', warnMs: 50 });
+      }
       return true;
     }
 
     function showSessionSwitchPlaceholder(title, workdir) {
+      cancelProgressiveHydration();
+      if (typeof clearStreamingMarkdownRenders === 'function') clearStreamingMarkdownRenders();
       if (typeof clearPendingCodeHighlights === 'function') clearPendingCodeHighlights();
       state.items = [];
       state.itemsById.clear();
@@ -189,6 +234,9 @@
     }
 
     function renderAllItems(items) {
+      const renderStarted = typeof performance !== 'undefined' ? performance.now() : Date.now();
+      cancelProgressiveHydration();
+      if (typeof clearStreamingMarkdownRenders === 'function') clearStreamingMarkdownRenders();
       if (typeof clearPendingCodeHighlights === 'function') clearPendingCodeHighlights();
       state.suppressAutoLoadUntil = Date.now() + 600;
       state.items = items || [];
@@ -204,13 +252,21 @@
         return;
       }
       els.emptyState.classList.add('hidden');
+      for (const it of state.items) {
+        state.itemsById.set(it.id, it);
+      }
+
+      const tailStart =
+        state.items.length > PROGRESSIVE_THRESHOLD
+          ? _findSafeSplitIndex(state.items, state.items.length - PROGRESSIVE_INITIAL_TAIL)
+          : 0;
+
       const frag = document.createDocumentFragment();
       if (state.hasMoreItems) {
         frag.appendChild(createLoadOlderBar());
       }
-      for (const it of state.items) {
-        state.itemsById.set(it.id, it);
-        createOrUpdateItemDom(it, { bulk: true, fresh: true, container: frag });
+      for (let i = tailStart; i < state.items.length; i++) {
+        createOrUpdateItemDom(state.items[i], { bulk: true, fresh: true, container: frag });
       }
 
       // Collapse all historical execution groups; expand ONLY the trailing one if currently busy
@@ -229,6 +285,49 @@
       state.lastScrollTop = 0;
       state.autoScroll = true;
       els.btnScrollBottom.classList.add('hidden');
+
+      if (tailStart > 0) {
+        const myToken = _progressiveHydrateToken;
+        let cursor = tailStart;
+        const scheduleNext = typeof requestAnimationFrame === 'function' ? requestAnimationFrame : (fn) => setTimeout(fn, 16);
+        const mountRange = (start, end) => {
+          if (start >= end) return;
+          const chunkFrag = document.createDocumentFragment();
+          for (let i = start; i < end; i++) createOrUpdateItemDom(state.items[i], { bulk: true, fresh: true, container: chunkFrag });
+          chunkFrag.querySelectorAll('details.process-group').forEach((grp) => {
+            grp.dataset.live = '0';
+            grp.open = false;
+            updateProcessGroupSummary(grp);
+          });
+          els.chatList.insertBefore(chunkFrag, _chatListFirstMessageAnchor());
+        };
+        const hydrateChunk = () => {
+          _progressiveHydrateRaf = null;
+          if (myToken !== _progressiveHydrateToken) return;
+          const start = _findSafeSplitIndex(state.items, Math.max(0, cursor - PROGRESSIVE_CHUNK_SIZE));
+          mountRange(start, cursor);
+          cursor = start;
+          if (cursor > 0 && myToken === _progressiveHydrateToken) _progressiveHydrateRaf = scheduleNext(hydrateChunk);
+          else _progressiveFlushFn = null;
+        };
+        _progressiveFlushFn = () => {
+          _clearProgressiveRaf();
+          if (myToken === _progressiveHydrateToken && cursor > 0) {
+            mountRange(0, cursor);
+            cursor = 0;
+          }
+        };
+        _progressiveHydrateRaf = scheduleNext(hydrateChunk);
+      }
+      if (typeof VibeTelemetry !== 'undefined') {
+        const durMs = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - renderStarted;
+        VibeTelemetry.recordSpan(
+          'render_all_items',
+          durMs,
+          { items: state.items.length },
+          { cat: 'perf', warnMs: 60, slowEvent: 'slow_render' }
+        );
+      }
     }
 
     // =========================================================================

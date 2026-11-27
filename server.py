@@ -1,6 +1,7 @@
 """VibeOne FastAPI entrypoint and HTTP/WebSocket API layer."""
 
 import asyncio
+import time
 from contextlib import asynccontextmanager
 from typing import Optional
 
@@ -60,6 +61,7 @@ from vibeone.routes.static_assets import (
     _VENDOR_MEDIA_TYPES,
     build_static_assets_router,
 )
+from vibeone.routes.telemetry import build_telemetry_router, log_http_trace
 from vibeone.routes.uploads import (
     _DEFAULT_ORPHAN_UPLOAD_MIN_AGE_SECONDS,
     _UPLOAD_READ_CHUNK_BYTES,
@@ -146,7 +148,12 @@ _DEFAULT_CSP = (
 
 @app.middleware("http")
 async def add_security_headers(request: Request, call_next):
+    started = time.perf_counter()
     response = await call_next(request)
+    duration_ms = (time.perf_counter() - started) * 1000.0
+    trace_id, _ = log_http_trace(request, response.status_code, duration_ms)
+    if trace_id:
+        response.headers.setdefault("X-VibeOne-Trace", trace_id)
     response.headers.setdefault("X-Content-Type-Options", "nosniff")
     response.headers.setdefault("X-Frame-Options", "DENY")
     response.headers.setdefault("Referrer-Policy", "no-referrer")
@@ -215,3 +222,9 @@ _ws_router, _ws_handlers = build_ws_router(
 )
 app.include_router(_ws_router)
 globals().update(_ws_handlers)
+
+_telemetry_router, _telemetry_handlers = build_telemetry_router(
+    require_http_auth=require_http_auth,
+)
+app.include_router(_telemetry_router)
+globals().update(_telemetry_handlers)
